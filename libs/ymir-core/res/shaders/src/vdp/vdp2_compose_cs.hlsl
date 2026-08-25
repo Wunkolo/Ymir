@@ -1,10 +1,12 @@
-#include "vdp2_render_params.hlsli"
+#include "vdp2_render_params_common.hlsli"
+#include "vdp2_compose_params.hlsli"
 
-cbuffer RenderParams : register(b0) {
-    RenderParams g_renderParams;
+cbuffer CommonRenderParams : register(b0) {
+    CommonRenderParams g_renderParams;
 }
 
-Texture2DArray<uint4> bgIn : register(t1);
+StructuredBuffer<ComposeParams> composeParams : register(t1);
+Texture2DArray<uint4> bgIn : register(t2);
 
 RWTexture2D<float4> textureOut : register(u0);
 

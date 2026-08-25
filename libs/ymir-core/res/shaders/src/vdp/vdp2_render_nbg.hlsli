@@ -1,7 +1,7 @@
 #ifndef YMIR_VDP_VDP2_NBG_HLSLI
 #define YMIR_VDP_VDP2_NBG_HLSLI
 
-#include "vdp2_layer_render_params.hlsli"
+#include "vdp2_render_params_layer.hlsli"
 #include "vdp2_defs.hlsli"
 #include "vdp2_utils.hlsli"
 

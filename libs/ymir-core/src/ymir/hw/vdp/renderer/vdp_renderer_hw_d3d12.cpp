@@ -861,8 +861,82 @@ struct Direct3D12VDPRenderer::Impl {
 
     /// @brief VDP2 compositor parameters.
     struct VDP2ComposeParams {
-        // TODO: add compositor parameters
-        // - no need to bit-pack, they're passed in as structured buffers
+        // Use color calculation per layer (0=disable; 1=enable)
+        //   bit  layer
+        //     0  Sprite
+        //     1  RBG0
+        //     2  RBG1/NBG0
+        //     3  NBG1/EXBG
+        //     4  NBG2
+        //     5  NBG3
+        //     6  Back screen
+        //     7  Line screen
+        HLSLuint colorCalcEnable;
+
+        // Use extended color calculation (always disabled in hi-res modes)
+        HLSLbool extendedColorCalc;
+
+        // Blend mode
+        //   0 = alpha
+        //   1 = additive
+        HLSLuint blendMode;
+
+        // Use second screen ratio
+        HLSLbool useSecondScreenRatio;
+
+        // Color offset enable per layer (0=disable; 1=enable)
+        //   bit  layer
+        //     0  Sprite
+        //     1  RBG0
+        //     2  RBG1/NBG0
+        //     3  NBG1/EXBG
+        //     4  NBG2
+        //     5  NBG3
+        //     6  Back screen
+        HLSLuint colorOffsetEnable;
+
+        // Color offset select per layer (0=A; 1=B)
+        //   bit  layer
+        //     0  Sprite
+        //     1  RBG0
+        //     2  RBG1/NBG0
+        //     3  NBG1/EXBG
+        //     4  NBG2
+        //     5  NBG3
+        //     6  Back screen
+        HLSLuint colorOffsetSelect;
+
+        // Line color enable per layer (0=disable; 1=enable)
+        //   bit  layer
+        //     0  Sprite
+        //     1  RBG0
+        //     2  RBG1/NBG0
+        //     3  NBG1/EXBG
+        //     4  NBG2
+        //     5  NBG3
+        //     6  Back screen (always false to simplify shader implementation)
+        HLSLuint lineColorEnable;
+
+        // Color offset A (RGB999)
+        HLSLint3 colorOffsetA;
+
+        // Color offset B (RGB999)
+        HLSLint3 colorOffsetB;
+
+        // NBG/RBG color calculation ratios
+        // index  layer
+        //     0  RBG0
+        //     1  NBG0/RBG1
+        //     2  NBG1/EXBG
+        //     3  NBG2
+        //     4  NBG3
+        std::array<HLSLuint, 5> bgColorCalcRatios;
+
+        // Back/line screen color calculation ratios
+        // index  layer
+        //     0  Back screen
+        //     1  Line screen
+        std::array<HLSLuint, 2> backLineColorCalcRatios;
     };
 
     /// @brief Number of entries in the VDP2 CRAM color cache.
@@ -980,6 +1054,13 @@ struct Direct3D12VDPRenderer::Impl {
         DescriptorRange layerRenderParamsSRV;
         /// @brief CPU-side layer rendering parameters.
         VDP2LayerRenderParams cpuLayerRenderParams;
+
+        /// @brief Layer composition parameters buffer.
+        D3D12Resource composeParamsBuffer;
+        /// @brief Layer composition parameters buffer SRV (offline).
+        DescriptorRange composeParamsSRV;
+        /// @brief CPU-side layer composition parameters.
+        VDP2ComposeParams cpuComposeParams;
 
         /// @brief Compute shader for drawing background layers.
         gpu::ComputeShader drawBGsShader;
@@ -1372,6 +1453,34 @@ struct Direct3D12VDPRenderer::Impl {
                                              vdp2.layerRenderParamsSRV.cpuHandle);
         }
 
+        // VDP2 layer compositing parameters buffer
+        {
+            auto builder = vdp2.composeParamsBuffer.BufferBuilder(sizeof(vdp2.cpuComposeParams));
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not create VDP2 layer compositing parameters buffer, error code {:X}", (uint32)hr)};
+            }
+            vdp2.composeParamsBuffer->SetName(L"[Ymir-VDP2] Layer compositing parameters buffer");
+
+            if (!offlineHeapAlloc.Allocate(vdp2.composeParamsSRV)) {
+                return util::ErrorMessage{"Could not allocate VDP2 layer compositing parameters buffer SRV"};
+            }
+            const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Buffer =
+                    {
+                        .FirstElement = 0,
+                        .NumElements = 1,
+                        .StructureByteStride = sizeof(vdp2.cpuComposeParams),
+                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                    },
+            };
+            device->CreateShaderResourceView(vdp2.composeParamsBuffer.GetPointer(), &srvDesc,
+                                             vdp2.composeParamsSRV.cpuHandle);
+        }
+
         // Build compute shader, root signature, pipeline state object and descriptors for drawing layers
         {
             auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_bgs_cs.cso");
@@ -1444,7 +1553,7 @@ struct Direct3D12VDPRenderer::Impl {
             auto rootSigBuilder = vdp2.composeRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(1, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddSRVs(2, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
                 .AddUAVs(1, 0);
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -1463,10 +1572,11 @@ struct Direct3D12VDPRenderer::Impl {
             vdp2.composePSO->SetName(L"[Ymir-VDP2] Layer compositing pipeline state object");
 
             const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                vdp2.composeParamsSRV.cpuHandle,
                 vdp2.layerOutSRV.cpuHandle,
                 vdp2.compositeOutUAV.cpuHandle,
             };
-            const UINT srcSizes[] = {1, 1};
+            const UINT srcSizes[] = {1, 1, 1};
 
             if (!resourceHeapAlloc.Allocate(vdp2.composeDescs, std::size(srcHandles))) {
                 return util::ErrorMessage{"Could not allocate VDP2 layer compositing descriptors"};
@@ -1987,6 +2097,92 @@ struct Direct3D12VDPRenderer::Impl {
         return {};
     }
 
+    util::VoidResult<> VDP2UpdateComposeParams() {
+        if (!vdp2.composeParamsDirty) {
+            return {};
+        }
+        vdp2.composeParamsDirty = false;
+
+        auto condenseBools = [](std::span<const bool> bools) {
+            uint32 value = 0;
+            for (size_t i = 0; i < bools.size(); ++i) {
+                if (bools[i]) {
+                    value |= 1u << i;
+                }
+            }
+            return value;
+        };
+
+        const VDP2Regs &regs2 = vdpState.regs2;
+
+        auto &params = vdp2.cpuComposeParams;
+        params.colorCalcEnable = 0                                               //
+                                 | (regs2.spriteParams.colorCalcEnable << 0)     //
+                                 | (regs2.bgParams[0].colorCalcEnable << 1)      //
+                                 | (regs2.bgParams[1].colorCalcEnable << 2)      //
+                                 | (regs2.bgParams[2].colorCalcEnable << 3)      //
+                                 | (regs2.bgParams[3].colorCalcEnable << 4)      //
+                                 | (regs2.bgParams[4].colorCalcEnable << 5)      //
+                                 | (regs2.backScreenParams.colorCalcEnable << 6) //
+                                 | (regs2.lineScreenParams.colorCalcEnable << 7) //
+            ;
+        params.extendedColorCalc = regs2.colorCalcParams.extendedColorCalcEnable && regs2.TVMD.HRESOn < 2;
+        params.blendMode = regs2.colorCalcParams.useAdditiveBlend;
+        params.useSecondScreenRatio = regs2.colorCalcParams.useSecondScreenRatio;
+        params.colorOffsetEnable = condenseBools(regs2.colorOffsetEnable);
+        params.colorOffsetSelect = condenseBools(regs2.colorOffsetSelect);
+        params.lineColorEnable = 0                                                 //
+                                 | (regs2.spriteParams.lineColorScreenEnable << 0) //
+                                 | (regs2.bgParams[0].lineColorScreenEnable << 1)  //
+                                 | (regs2.bgParams[1].lineColorScreenEnable << 2)  //
+                                 | (regs2.bgParams[2].lineColorScreenEnable << 3)  //
+                                 | (regs2.bgParams[3].lineColorScreenEnable << 4)  //
+                                 | (regs2.bgParams[4].lineColorScreenEnable << 5)  //
+            ;
+
+        params.colorOffsetA.r = bit::sign_extend<9>(regs2.colorOffset[0].r);
+        params.colorOffsetA.g = bit::sign_extend<9>(regs2.colorOffset[0].g);
+        params.colorOffsetA.b = bit::sign_extend<9>(regs2.colorOffset[0].b);
+
+        params.colorOffsetB.r = bit::sign_extend<9>(regs2.colorOffset[1].r);
+        params.colorOffsetB.g = bit::sign_extend<9>(regs2.colorOffset[1].g);
+        params.colorOffsetB.b = bit::sign_extend<9>(regs2.colorOffset[1].b);
+
+        for (int i = 0; i < 5; ++i) {
+            params.bgColorCalcRatios[i] = regs2.bgParams[0].colorCalcRatio;
+        }
+        params.backLineColorCalcRatios[0] = regs2.backScreenParams.colorCalcRatio;
+        params.backLineColorCalcRatios[1] = regs2.lineScreenParams.colorCalcRatio;
+
+        // Update buffer
+        {
+            ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
+            UploadAllocation alloc{};
+
+            BufferTransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.Add(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
+                        D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                        D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
+            const size_t size = sizeof(vdp2.cpuComposeParams);
+            if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
+                return util::ErrorMessage{
+                    fmt::format("Failed to allocate upload buffer for VDP2 layer compositing parameters: {}",
+                                result.Error().message)};
+            }
+            memcpy(alloc.data, &vdp2.cpuComposeParams, size);
+
+            ID3D12Resource *dstResource = vdp2.composeParamsBuffer.GetPointer();
+            vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+            barrier.Reverse().Emit(vdp2.cmdList);
+        }
+
+        return {};
+    }
+
     void VDP2CalcAccessPatterns() {
         vdp2.layerRenderParamsDirty |= vdpState.regs2.accessPatternsDirty;
         vdpState.state2.CalcAccessPatterns(vdpState.regs2, vdp2.accessPatternsConfig);
@@ -2102,7 +2298,7 @@ struct Direct3D12VDPRenderer::Impl {
         VDP2UpdateCommonRenderParams();
         VDP2UpdateLayerRenderParams();
         // TODO: VDP2UpdateRotRegs();
-        // TODO: VDP2UpdateComposeParams();
+        VDP2UpdateComposeParams();
     }
 
     void VDP2BeginFrame() {
@@ -2204,7 +2400,13 @@ struct Direct3D12VDPRenderer::Impl {
         VDP2UpdateCommonRenderParams();
         // TODO: VDP2UploadLineColorBackTexture();
 
-        // TODO: barriers if needed
+        // Transition all compositing resources to compute shading usage
+        BufferTransitionBarrierSet barriers{features.enhancedBarriers};
+        barriers.Add(vdp2.composeParamsBuffer.GetPointer(), sizeof(vdp2.cpuComposeParams), //
+                     D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_COMPUTE_SHADING,          //
+                     D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON,          //
+                     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        barriers.Emit(cmdList);
 
         // Determine how many lines to draw and update next scanline counter
         const uint32 numLines = y - vdp2.nextComposeLine + 1;

@@ -1,7 +1,5 @@
-#ifndef YMIR_VDP_VDP2_LAYER_RENDER_PARAMS_HLSLI
-#define YMIR_VDP_VDP2_LAYER_RENDER_PARAMS_HLSLI
-
-#include "vdp2_defs.hlsli"
+#ifndef YMIR_VDP_VDP2_RENDER_PARAMS_LAYER_HLSLI
+#define YMIR_VDP_VDP2_RENDER_PARAMS_LAYER_HLSLI
 
 // See C++ code for documentation on the fields
 

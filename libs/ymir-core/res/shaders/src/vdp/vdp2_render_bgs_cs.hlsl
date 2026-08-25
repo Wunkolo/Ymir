@@ -1,10 +1,11 @@
-#include "vdp2_render_params.hlsli"
+#include "vdp2_render_params_common.hlsli"
+#include "vdp2_render_params_layer.hlsli"
 
 #include "vdp2_render_nbg.hlsli"
 #include "vdp2_render_rbg.hlsli"
 
-cbuffer RenderParams : register(b0) {
-    RenderParams g_renderParams;
+cbuffer CommonRenderParams : register(b0) {
+    CommonRenderParams g_renderParams;
 }
 
 ByteAddressBuffer vram : register(t1);
