@@ -1,4 +1,4 @@
-#include "vdp2_render_params_common.hlsli"
+#include "vdp2_common_params.hlsli"
 #include "vdp2_compose_params.hlsli"
 
 cbuffer CommonRenderParams : register(b0) {

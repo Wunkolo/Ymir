@@ -1,21 +1,9 @@
 #ifndef YMIR_VDP_VDP2_RENDER_PARAMS_LAYER_HLSLI
 #define YMIR_VDP_VDP2_RENDER_PARAMS_LAYER_HLSLI
 
+#include "vdp2_render_params_window.hlsli"
+
 // See C++ code for documentation on the fields
-
-struct WindowParams {
-    bool windowLogicAnd;
-    bool window0Enable;
-    bool window0Invert;
-    bool window1Enable;
-    bool window1Invert;
-};
-
-struct WindowParamsS {
-    WindowParams base;
-    bool spriteWindowEnable;
-    bool spriteWindowInvert;
-};
 
 struct BaseBGParams {
     bool enabled;
@@ -42,7 +30,7 @@ struct BaseBGParams {
     uint specialColorCalcMode;
     uint2 pageShift;
     uint bitmapBaseAddress;
-    WindowParamsS windowParams;
+    LayerWindowParamsS windowParams;
 };
 
 struct NBGParams {
@@ -72,6 +60,8 @@ struct RBGParams {
 struct LayerRenderParams {
     NBGParams nbg[4];
     RBGParams rbg[2];
+
+    GlobalWindowParams windows[2];
 };
 
 #endif

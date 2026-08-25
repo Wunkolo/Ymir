@@ -9,9 +9,6 @@ static const uint kInterlaceModeInvalid = 1;
 static const uint kInterlaceModeSingleDensity = 2;
 static const uint kInterlaceModeDoubleDensity = 3;
 
-static const uint kWindowLogicOR = 0;
-static const uint kWindowLogicAND = 1;
-
 static const uint kColorFormatPalette16 = 0;
 static const uint kColorFormatPalette256 = 1;
 static const uint kColorFormatPalette2048 = 2;
