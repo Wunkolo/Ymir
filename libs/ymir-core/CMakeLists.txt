@@ -396,6 +396,7 @@ set(SHADER_INPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/res/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 
 set(COMPUTE_SHADER_SOURCES
+    res/shaders/src/vdp/vdp2_compose_cs.hlsl
     res/shaders/src/vdp/vdp2_render_bgs_cs.hlsl
 )
 ## TODO: add per-platform shader code if needed

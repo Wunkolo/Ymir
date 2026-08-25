@@ -964,12 +964,15 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief CPU-side VDP2 rotation parameter base values.
         std::array<VDP2RotParamBase, kMaxNormalResV * 2> cpuRotParamBases;
 
+        /// @brief 2D texture for the composited VDP2 output.
+        D3D12Resource compositeOutTexture;
+        /// @brief Composited VDP2 output UAV (offline).
+        DescriptorRange compositeOutUAV;
+
         // ---------------------------------------------------------------------
 
         /// @brief Common rendering parameters, uploaded as 32-bit root constants.
         VDP2CommonRenderParams cpuCommonRenderParams;
-
-        // ---------------------------------------------------------------------
 
         /// @brief Layer rendering parameters buffer.
         D3D12Resource layerRenderParamsBuffer;
@@ -986,6 +989,15 @@ struct Direct3D12VDPRenderer::Impl {
         D3D12PipelineState drawBGsPSO;
         /// @brief Descriptor range for drawing background layers.
         DescriptorRange drawBGsDescs;
+
+        /// @brief Compute shader for compositing layers.
+        gpu::ComputeShader composeShader;
+        /// @brief Root signature for compositing layers.
+        D3D12RootSignature composeRootSig;
+        /// @brief Pipeline state object for compositing layers.
+        D3D12PipelineState composePSO;
+        /// @brief Descriptor range for compositing layers.
+        DescriptorRange composeDescs;
 
         // ---------------------------------------------------------------------
         // Rendering state
@@ -1275,6 +1287,35 @@ struct Direct3D12VDPRenderer::Impl {
             device->CreateShaderResourceView(vdp2.lnclBackTexture.GetPointer(), &srvDesc, vdp2.lnclBackSRV.cpuHandle);
         }
 
+        // Composited VDP2 output texture
+        {
+            static constexpr DXGI_FORMAT kFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+            auto builder = vdp2.compositeOutTexture.Texture2DBuilder(kMaxResH, kMaxResV);
+            builder.Format(kFormat);
+            builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create composited output texture, error code {:X}", (uint32)hr)};
+            }
+            vdp2.compositeOutTexture->SetName(L"[Ymir-VDP2] Composited output texture");
+
+            if (!offlineHeapAlloc.Allocate(vdp2.compositeOutUAV)) {
+                return util::ErrorMessage{"Could not composited output texture UAV"};
+            }
+            const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+                .Format = kFormat,
+                .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D,
+                .Texture2D =
+                    {
+                        .MipSlice = 0,
+                        .PlaneSlice = 0,
+                    },
+            };
+            device->CreateUnorderedAccessView(vdp2.compositeOutTexture.GetPointer(), nullptr, &uavDesc,
+                                              vdp2.compositeOutUAV.cpuHandle);
+        }
+
         // VDP2 rotation parameter base values buffer
         {
             auto builder = vdp2.rotParamBasesBuffer.BufferBuilder(sizeof(vdp2.cpuRotParamBases));
@@ -1331,7 +1372,7 @@ struct Direct3D12VDPRenderer::Impl {
                                              vdp2.layerRenderParamsSRV.cpuHandle);
         }
 
-        // Draw background layers compute shader, root signature, pipeline state object and descriptors
+        // Build compute shader, root signature, pipeline state object and descriptors for drawing layers
         {
             auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_bgs_cs.cso");
             if (!shaderBlobResult) {
@@ -1370,10 +1411,6 @@ struct Direct3D12VDPRenderer::Impl {
             }
             vdp2.drawBGsPSO->SetName(L"[Ymir-VDP2] Background layer rendering pipeline state object");
 
-            if (!resourceHeapAlloc.Allocate(vdp2.drawBGsDescs, 4)) {
-                return util::ErrorMessage{"Could not allocate VDP2 background layer rendering descriptors"};
-            }
-
             const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
                 vdp2.vramSRV.cpuHandle,
                 vdp2.cramColorSRV.cpuHandle,
@@ -1382,7 +1419,62 @@ struct Direct3D12VDPRenderer::Impl {
             };
             const UINT srcSizes[] = {1, 1, 1, 1};
 
+            if (!resourceHeapAlloc.Allocate(vdp2.drawBGsDescs, std::size(srcHandles))) {
+                return util::ErrorMessage{"Could not allocate VDP2 background layer rendering descriptors"};
+            }
+
             device->CopyDescriptors(1, &vdp2.drawBGsDescs.cpuHandle, &vdp2.drawBGsDescs.count, std::size(srcHandles),
+                                    srcHandles, srcSizes, resourceHeap.GetHeapType());
+        }
+
+        // Build compute shader, root signature, pipeline state object and descriptors for compositing layers
+        {
+            auto shaderBlobResult = LoadShader("src/vdp/vdp2_compose_cs.cso");
+            if (!shaderBlobResult) {
+                return util::ErrorMessage{fmt::format("Could not load VDP2 layer compositing compute shader: {}",
+                                                      shaderBlobResult.Error().message)};
+            }
+            vdp2.composeShader.format = gpu::ShaderBytecodeFormat::DXIL;
+            vdp2.composeShader.bytecode = shaderBlobResult.Value();
+            vdp2.composeShader.entrypoint = kCSEntrypoint;
+            auto result = gpu::ValidateShader(vdp2.composeShader);
+            if (!result) {
+                return util::ErrorMessage{
+                    fmt::format("VDP2 layer compositing compute shader validation failed: {}", result.Error().message)};
+            }
+
+            auto rootSigBuilder = vdp2.composeRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
+            rootSigBuilder.AddDescriptorTable()
+                .AddSRVs(1, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(1, 0);
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not build VDP2 layer compositing root signature, error code {:X}", (uint32)hr)};
+            }
+            vdp2.composeRootSig->SetName(L"[Ymir-VDP2] Layer compositing root signature");
+
+            const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+                .pRootSignature = vdp2.composeRootSig.GetPointer(),
+                .CS = ToShaderBytecode(vdp2.composeShader),
+            };
+            if (HRESULT hr = vdp2.composePSO.CreateCompute(device, psoDesc); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not build VDP2 layer compositing pipeline state object, error code {:X}", (uint32)hr)};
+            }
+            vdp2.composePSO->SetName(L"[Ymir-VDP2] Layer compositing pipeline state object");
+
+            const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                vdp2.layerOutSRV.cpuHandle,
+                vdp2.compositeOutUAV.cpuHandle,
+            };
+            const UINT srcSizes[] = {1, 1};
+
+            if (!resourceHeapAlloc.Allocate(vdp2.composeDescs, std::size(srcHandles))) {
+                return util::ErrorMessage{"Could not allocate VDP2 layer compositing descriptors"};
+            }
+
+            device->CopyDescriptors(1, &vdp2.composeDescs.cpuHandle, &vdp2.composeDescs.count, std::size(srcHandles),
                                     srcHandles, srcSizes, resourceHeap.GetHeapType());
         }
 
@@ -2080,7 +2172,7 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.cpuCommonRenderParams.startY = startY << yShift;
 
         // TODO: Draw sprite layer
-        // cmdList->Dispatch((ScaleUpCeil(m_HRes) + 31) / 32, numScaledLines, enhancements.transparentMeshes ? 2 : 1);
+        // cmdList->Dispatch((ScaleUpCeil(HRes) + 31) / 32, numScaledLines, enhancements.transparentMeshes ? 2 : 1);
 
         // TODO: Draw color calculation window
         // cmdList->Dispatch(HRes / 32, numLines, 1);
@@ -2091,7 +2183,7 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
                                               &vdp2.cpuCommonRenderParams, 0);
         cmdList->SetComputeRootDescriptorTable(1, vdp2.drawBGsDescs.gpuHandle);
-        // cmdList->Dispatch((ScaleUpCeil(m_HRes) + 31) / 32, numScaledLines, 1);
+        // cmdList->Dispatch((ScaleUpCeil(HRes) + 31) / 32, numScaledLines, 1);
         cmdList->Dispatch(HRes / 32, numScaledLines, 1);
     }
 
@@ -2102,6 +2194,30 @@ struct Direct3D12VDPRenderer::Impl {
         //   - compose lines from composeSegmentStartY to y-1 (if possible)
         //   - set composeSegmentStartY = y
         //   - clear dirty state
+
+        // Bail out if there's nothing to render
+        if (y < vdp2.nextComposeLine) {
+            return;
+        }
+
+        auto &cmdList = vdp2.cmdList;
+
+        vdp2.cpuCommonRenderParams.startY = vdp2.nextComposeLine;
+        VDP2UpdateCommonRenderParams();
+        // TODO: VDP2UploadLineColorBackTexture();
+
+        // Determine how many lines to draw and update next scanline counter
+        const uint32 numLines = y - vdp2.nextComposeLine + 1;
+        vdp2.nextComposeLine = y + 1;
+
+        // Compose final image
+        cmdList->SetPipelineState(vdp2.composePSO.GetPointer());
+        cmdList->SetComputeRootSignature(vdp2.composeRootSig.GetPointer());
+        cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
+                                              &vdp2.cpuCommonRenderParams, 0);
+        cmdList->SetComputeRootDescriptorTable(1, vdp2.composeDescs.gpuHandle);
+        // cmdList->Dispatch((ScaleUpCeil(HRes) + 31) / 32, ScaleUpCeil(numLines), 1);
+        cmdList->Dispatch((HRes + 31) / 32, numLines, 1);
     }
 
     void VDP2RenderLine(uint32 y) {
