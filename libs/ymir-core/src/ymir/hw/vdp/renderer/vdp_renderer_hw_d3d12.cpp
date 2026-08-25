@@ -1376,17 +1376,16 @@ struct Direct3D12VDPRenderer::Impl {
         {
             auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_bgs_cs.cso");
             if (!shaderBlobResult) {
-                return util::ErrorMessage{
-                    fmt::format("Could not load VDP2 background layer rendering compute shader: {}",
-                                shaderBlobResult.Error().message)};
+                return util::ErrorMessage{fmt::format("Could not load VDP2 layer rendering compute shader: {}",
+                                                      shaderBlobResult.Error().message)};
             }
             vdp2.drawBGsShader.format = gpu::ShaderBytecodeFormat::DXIL;
             vdp2.drawBGsShader.bytecode = shaderBlobResult.Value();
             vdp2.drawBGsShader.entrypoint = kCSEntrypoint;
             auto result = gpu::ValidateShader(vdp2.drawBGsShader);
             if (!result) {
-                return util::ErrorMessage{fmt::format(
-                    "VDP2 background layer rendering compute shader validation failed: {}", result.Error().message)};
+                return util::ErrorMessage{
+                    fmt::format("VDP2 layer rendering compute shader validation failed: {}", result.Error().message)};
             }
 
             auto rootSigBuilder = vdp2.drawBGsRootSig.Builder();
@@ -1395,10 +1394,10 @@ struct Direct3D12VDPRenderer::Impl {
                 .AddSRVs(3, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
                 .AddUAVs(1, 0);
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
-                return util::ErrorMessage{fmt::format(
-                    "Could not build VDP2 background layer rendering root signature, error code {:X}", (uint32)hr)};
+                return util::ErrorMessage{
+                    fmt::format("Could not build VDP2 layer rendering root signature, error code {:X}", (uint32)hr)};
             }
-            vdp2.drawBGsRootSig->SetName(L"[Ymir-VDP2] Background layer rendering root signature");
+            vdp2.drawBGsRootSig->SetName(L"[Ymir-VDP2] Layer rendering root signature");
 
             const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
                 .pRootSignature = vdp2.drawBGsRootSig.GetPointer(),
@@ -1406,10 +1405,9 @@ struct Direct3D12VDPRenderer::Impl {
             };
             if (HRESULT hr = vdp2.drawBGsPSO.CreateCompute(device, psoDesc); FAILED(hr)) {
                 return util::ErrorMessage{fmt::format(
-                    "Could not build VDP2 background layer rendering pipeline state object, error code {:X}",
-                    (uint32)hr)};
+                    "Could not build VDP2 layer rendering pipeline state object, error code {:X}", (uint32)hr)};
             }
-            vdp2.drawBGsPSO->SetName(L"[Ymir-VDP2] Background layer rendering pipeline state object");
+            vdp2.drawBGsPSO->SetName(L"[Ymir-VDP2] Layer rendering pipeline state object");
 
             const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
                 vdp2.vramSRV.cpuHandle,
@@ -1420,7 +1418,7 @@ struct Direct3D12VDPRenderer::Impl {
             const UINT srcSizes[] = {1, 1, 1, 1};
 
             if (!resourceHeapAlloc.Allocate(vdp2.drawBGsDescs, std::size(srcHandles))) {
-                return util::ErrorMessage{"Could not allocate VDP2 background layer rendering descriptors"};
+                return util::ErrorMessage{"Could not allocate VDP2 layer rendering descriptors"};
             }
 
             device->CopyDescriptors(1, &vdp2.drawBGsDescs.cpuHandle, &vdp2.drawBGsDescs.count, std::size(srcHandles),
@@ -2205,6 +2203,8 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.cpuCommonRenderParams.startY = vdp2.nextComposeLine;
         VDP2UpdateCommonRenderParams();
         // TODO: VDP2UploadLineColorBackTexture();
+
+        // TODO: barriers if needed
 
         // Determine how many lines to draw and update next scanline counter
         const uint32 numLines = y - vdp2.nextComposeLine + 1;
