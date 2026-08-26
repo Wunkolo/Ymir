@@ -5,6 +5,13 @@
 
 struct CommonRenderParams {
     uint startY;
+    uint displayParams;
+    uint layerParams;
+    uint spriteParams;
+    uint2 spritePriosRatios;
+    uint vcellScroll;
+    uint windows;
+    uint enhancements;
 };
 
 #endif

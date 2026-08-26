@@ -139,6 +139,22 @@ union HLSLint3 {
 };
 static_assert(sizeof(HLSLint3) == sizeof(HLSLint) * 3);
 
+/// @brief Packs up bool into the least significant bits of an unsigned integer.
+/// @tparam T the unsigned integral type
+/// @param[in] bools the bools to pack
+/// @return the packed value
+template <std::unsigned_integral T>
+static uint32 PackBools(std::span<const bool> bools) {
+    T value = 0;
+    size_t count = std::min(bools.size(), sizeof(T) * 8);
+    for (size_t i = 0; i < count; ++i) {
+        if (bools[i]) {
+            value |= static_cast<T>(1u) << static_cast<T>(i);
+        }
+    }
+    return value;
+}
+
 // Base Xst, Yst, KA for params A and B relative to startY
 struct alignas(16) VDP2RotParamBase {
     uint32 tableAddress;
@@ -623,9 +639,117 @@ struct Direct3D12VDPRenderer::Impl {
     /// @brief Common VDP2 rendering parameters shared by all shaders.
     struct VDP2CommonRenderParams {
         // Top Y coordinate of target rendering area.
-        uint32 startY;
+        HLSLuint startY;
 
-        // TODO: bit-pack more common parameters to minimize DWORDs spent with this
+        struct DisplayParams {                 //  bits  use
+            HLSLuint displayEnable : 1;        //     0  Display enabled
+                                               //          0 = display off
+                                               //          1 = display on
+            HLSLuint borderColorMode : 1;      //     1  Border color mode
+                                               //          0 = black
+                                               //          1 = back screen color
+            HLSLuint interlaceMode : 2;        //   2-4  Interlace mode
+                                               //          0 = progressive
+                                               //          1 = invalid
+                                               //          2 = single-density interlace
+                                               //          3 = double-density interlace
+            HLSLuint oddField : 1;             //     5  Field
+                                               //          0 = even
+                                               //          1 = odd
+            HLSLuint exclusiveMonitor : 1;     //     6  Exclusive monitor mode
+                                               //          0 = normal
+                                               //          1 = exclusive
+            HLSLuint colorRAMMode : 2;         //   7-8  Color RAM mode
+                                               //          0 = RGB 5:5:5, 1024 words
+                                               //          1 = RGB 5:5:5, 2048 words
+                                               //          2 = RGB 8:8:8, 1024 words
+                                               //          3 = RGB 8:8:8, 1024 words  (same as mode 2, undocumented)
+            HLSLuint hiResH : 1;               //     9  Horizontal resolution
+                                               //          0 = 320/352
+                                               //          1 = 640/704
+            HLSLuint palMode : 1;              //    10  Display standard (VDP2 TVSTAT.PAL)
+                                               //          0 = NTSC
+                                               //          1 = PAL
+            HLSLuint hresMode : 3;             // 11-13  Horizontal resolution mode (VDP2 TVMD.HRESO2-0)
+            HLSLuint vresMode : 2;             // 14-15  Vertical resolution mode   (VDP2 TVMD.VRESO1-0)
+            HLSLuint dblInterlaceEnable : 1;   //    16  VDP1 double interlace enable flag (VDP1 FBCR.DIE)
+            HLSLuint dblInterlaceDrawLine : 1; //    17  VDP1 double interlace draw line   (VDP1 FBCR.DIL)
+        } displayParams;
+
+        struct {                              //  bits  use
+            HLSLuint layerEnabled : 6;        //   0-5  Layer enable state based on BGON and other factors:
+                                              //        bit  RBG0+RBG1   RBG0        RBG1        no RBGs
+                                              //          0  Sprite      Sprite      Sprite      Sprite
+                                              //          1  RBG0        RBG0        -           -
+                                              //          2  RBG1        NBG0        RBG1        NBG0
+                                              //          3  EXBG        NBG1/EXBG   NBG1/EXBG   NBG1/EXBG
+                                              //          4  -           NBG2        NBG2        NBG2
+                                              //          5  -           NBG3        NBG3        NBG3
+            HLSLuint bgEnabled : 6;           //  6-11  Individual layer enable flags
+                                              //        bit  layer
+                                              //          8  NBG0
+                                              //          9  NBG1
+                                              //         10  NBG2
+                                              //         11  NBG3
+                                              //         12  RBG0
+                                              //         13  RBG1
+            HLSLuint lineColorEnableRBG0 : 1; //    12  Line color screen enable for RBG0
+            HLSLuint lineColorEnableRBG1 : 1; //    13  Line color screen enable for RBG1
+            HLSLuint mosaicH : 4;             // 14-17  Horizontal mosaic size (minus one)
+            HLSLuint mosaicV : 4;             // 18-21  Vertical mosaic size (minus one)
+        } layerParams;
+
+        struct {                          //  bits  use
+            HLSLuint rotate : 1;          //     0  Sprite layer rotation
+                                          //          0 = normal
+                                          //          1 = use rotation parameter A
+            HLSLuint pixel8Bits : 1;      //     1  VDP1 data size
+                                          //          0 = 16-bit
+                                          //          1 = 8-bit
+            HLSLuint type : 4;            //   2-5  Sprite data type
+            HLSLuint fbSizeH : 1;         //     6  VDP1 framebuffer horizontal size shift  (512 << x)
+            HLSLuint inHalfResH : 1;      //     7  Sprite input at half resolution
+            HLSLuint outHalfResH : 1;     //     8  Sprite output at half resolution
+            HLSLuint mixedFormat : 1;     //     9  Sprite layer color format
+                                          //          0 = palette only
+                                          //          1 = mixed palette/RGB
+            HLSLuint colorCalcEnable : 1; //    10  Sprite color calculation enable
+            HLSLuint colorCalcValue : 3;  // 11-13  Sprite target color calculation value
+            HLSLuint colorCalcCond : 2;   // 14-15  Special color calculation condition
+            HLSLuint colorDataOffset : 3; // 16-18  Special color data offset in CRAM
+            HLSLuint useSpriteWindow : 1; //    19  Use sprite window
+            HLSLuint windowEnabled : 1;   //    20  Sprite window enabled for the sprite layer
+            HLSLuint windowInverted : 1;  //    21  Sprite window inverted for the sprite layer
+            HLSLuint displayFB : 1;       //    22  Current sprite display framebuffer index
+        } spriteParams;
+
+        // Packed 8x 3-bit sprite priorities + 5-bit color calculation ratios
+        HLSLuint2 spritePriosRatios;
+
+        struct {                        //  bits  use
+            HLSLuint tableAddress : 19; //  0-18  Vertical cell scroll table address
+            HLSLuint inc : 3;           // 19-21  Vertical cell scroll address increment per cell  (x << 2)
+        } vcellScroll;
+
+        struct {                               //  bits  use
+            HLSLuint spriteWindowLogic : 1;    //     0  Sprite window logic        0=OR; 1=AND
+            HLSLuint spriteW0Enable : 1;       //     1  Sprite W0 enable           0=disable; 1=enable
+            HLSLuint spriteW0Invert : 1;       //     2  Sprite W0 invert           0=disable; 1=enable
+            HLSLuint spriteW1Enable : 1;       //     3  Sprite W1 enable           0=disable; 1=enable
+            HLSLuint spriteW1Invert : 1;       //     4  Sprite W1 invert           0=disable; 1=enable
+            HLSLuint colorCalcWindowLogic : 1; //     5  Color calc. window logic   0=OR; 1=AND
+            HLSLuint colorCalcW0Enable : 1;    //     6  Color calc. W0 enable      0=disable; 1=enable
+            HLSLuint colorCalcW0Invert : 1;    //     7  Color calc. W0 invert      0=disable; 1=enable
+            HLSLuint colorCalcW1Enable : 1;    //     8  Color calc. W1 enable      0=disable; 1=enable
+            HLSLuint colorCalcW1Invert : 1;    //     9  Color calc. W1 invert      0=disable; 1=enable
+            HLSLuint colorCalcSWEnable : 1;    //    10  Color calc. SW enable      0=disable; 1=enable
+            HLSLuint colorCalcSWInvert : 1;    //    11  Color calc. SW invert      0=disable; 1=enable
+        } windows;
+
+        struct {                            //  bits  use
+            HLSLuint deinterlace : 1;       //     0  Deinterlace
+            HLSLuint transparentMeshes : 1; //     1  Render mesh sprites as transparent
+        } enhancements;
     };
 
     /// @brief VDP2 window parameters.
@@ -937,6 +1061,20 @@ struct Direct3D12VDPRenderer::Impl {
         //     0  Back screen
         //     1  Line screen
         std::array<HLSLuint, 2> backLineColorCalcRatios;
+
+        // Color gradation enabled
+        HLSLbool colorGradEnable;
+
+        // Color gradation screen
+        //   0  Sprite
+        //   1  RBG0
+        //   2  NBG0/RBG1
+        //   3  (invalid)
+        //   4  NBG1/EXBG
+        //   5  NBG2
+        //   6  NBG3
+        //   7  (invalid)
+        HLSLuint colorGradScreen;
     };
 
     /// @brief Number of entries in the VDP2 CRAM color cache.
@@ -1005,7 +1143,7 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief CRAM color buffer SRV (offline).
         DescriptorRange cramColorSRV;
         /// @brief CPU-side CRAM color buffer.
-        CRAMColorCache cpuCRAMColorCache;
+        CRAMColorCache cpuCRAMColorCache{};
 
         /// @brief Raw CRAM rotation coefficients buffer.
         D3D12Resource cramRotCoeffBuffer;
@@ -1029,14 +1167,14 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief LNCL/BACK screen texture SRV (offline).
         DescriptorRange lnclBackSRV;
         /// @brief CPU-side LNCL/BACK screen texture (0,y=LNCL; 1,y=BACK).
-        std::array<std::array<ColorR8G8B8A8, 2>, kMaxResV> cpuLnclBack;
+        std::array<std::array<ColorR8G8B8A8, 2>, kMaxResV> cpuLnclBack{};
 
         /// @brief VDP2 rotation parameter base values buffer.
         D3D12Resource rotParamBasesBuffer;
         /// @brief VDP2 rotation parameter base values buffer SRV (offline).
         DescriptorRange rotParamBasesSRV;
         /// @brief CPU-side VDP2 rotation parameter base values.
-        std::array<VDP2RotParamBase, kMaxNormalResV * 2> cpuRotParamBases;
+        std::array<VDP2RotParamBase, kMaxNormalResV * 2> cpuRotParamBases{};
 
         /// @brief 2D texture for the composited VDP2 output.
         D3D12Resource compositeOutTexture;
@@ -1046,21 +1184,21 @@ struct Direct3D12VDPRenderer::Impl {
         // ---------------------------------------------------------------------
 
         /// @brief Common rendering parameters, uploaded as 32-bit root constants.
-        VDP2CommonRenderParams cpuCommonRenderParams;
+        VDP2CommonRenderParams cpuCommonRenderParams{};
 
         /// @brief Layer rendering parameters buffer.
         D3D12Resource layerRenderParamsBuffer;
         /// @brief Layer rendering parameters buffer SRV (offline).
         DescriptorRange layerRenderParamsSRV;
         /// @brief CPU-side layer rendering parameters.
-        VDP2LayerRenderParams cpuLayerRenderParams;
+        VDP2LayerRenderParams cpuLayerRenderParams{};
 
         /// @brief Layer composition parameters buffer.
         D3D12Resource composeParamsBuffer;
         /// @brief Layer composition parameters buffer SRV (offline).
         DescriptorRange composeParamsSRV;
         /// @brief CPU-side layer composition parameters.
-        VDP2ComposeParams cpuComposeParams;
+        VDP2ComposeParams cpuComposeParams{};
 
         /// @brief Compute shader for drawing background layers.
         gpu::ComputeShader drawBGsShader;
@@ -1921,6 +2059,82 @@ struct Direct3D12VDPRenderer::Impl {
     void VDP2UpdateCommonRenderParams() {
         // vdp2.cpuCommonRenderParams.startY is updated by the line rendering functions.
 
+        const VDP1Regs &regs1 = vdpState.regs1;
+        const VDP2Regs &regs2 = vdpState.regs2;
+        VDP2CommonRenderParams &params = vdp2.cpuCommonRenderParams;
+
+        params.displayParams.displayEnable = regs2.TVMD.DISP;
+        params.displayParams.borderColorMode = regs2.TVMD.BDCLMD;
+        params.displayParams.interlaceMode = static_cast<uint32>(regs2.TVMD.LSMDn);
+        params.displayParams.oddField = regs2.TVSTAT.ODD;
+        params.displayParams.exclusiveMonitor = exclusiveMonitor;
+        params.displayParams.colorRAMMode = regs2.vramControl.colorRAMMode;
+        params.displayParams.hiResH = bit::test<1>(regs2.TVMD.HRESOn);
+        params.displayParams.palMode = regs2.TVSTAT.PAL;
+        params.displayParams.hresMode = regs2.TVMD.HRESOn;
+        params.displayParams.vresMode = regs2.TVMD.VRESOn;
+        params.displayParams.dblInterlaceEnable = regs1.dblInterlaceEnable;
+        params.displayParams.dblInterlaceDrawLine = regs1.dblInterlaceDrawLine;
+
+        params.layerParams.layerEnabled = PackBools<HLSLuint>(vdpState.state2.layerEnabled);
+        params.layerParams.bgEnabled = PackBools<HLSLuint>(regs2.bgEnabled);
+        params.layerParams.lineColorEnableRBG0 = regs2.bgParams[0].lineColorScreenEnable;
+        params.layerParams.lineColorEnableRBG1 = regs2.bgParams[1].lineColorScreenEnable;
+        params.layerParams.mosaicH = regs2.mosaicH - 1;
+        params.layerParams.mosaicV = regs2.mosaicV - 1;
+
+        params.spriteParams.rotate = regs1.fbRotEnable;
+        params.spriteParams.pixel8Bits = regs1.pixel8Bits;
+        params.spriteParams.type = regs2.spriteParams.type;
+        params.spriteParams.fbSizeH = std::countr_zero(regs1.fbSizeH) - 9;
+        params.spriteParams.inHalfResH = false;
+        params.spriteParams.outHalfResH = false;
+        if (!regs1.hdtvEnable && !regs1.fbRotEnable) {
+            if (regs1.pixel8Bits) {
+                params.spriteParams.inHalfResH = (regs2.TVMD.HRESOn & 0b110) == 0b000;
+            } else {
+                params.spriteParams.outHalfResH = (regs2.TVMD.HRESOn & 0b110) == 0b010;
+            }
+        }
+        params.spriteParams.mixedFormat = regs2.spriteParams.mixedFormat;
+        params.spriteParams.colorCalcEnable = regs2.spriteParams.colorCalcEnable;
+        params.spriteParams.colorCalcValue = regs2.spriteParams.colorCalcValue;
+        params.spriteParams.colorCalcCond = static_cast<uint32>(regs2.spriteParams.colorCalcCond);
+        params.spriteParams.colorDataOffset = regs2.spriteParams.colorDataOffset >> 8u;
+        params.spriteParams.useSpriteWindow = regs2.spriteParams.useSpriteWindow;
+        params.spriteParams.windowEnabled = regs2.spriteParams.spriteWindowEnabled;
+        params.spriteParams.windowInverted = regs2.spriteParams.spriteWindowInverted;
+        params.spriteParams.displayFB = vdpState.displayFB;
+
+        params.spritePriosRatios.x = 0;
+        params.spritePriosRatios.y = 0;
+        for (uint32 i = 0; i < 4; i++) {
+            params.spritePriosRatios.x |= regs2.spriteParams.priorities[i] << (8 * i);
+            params.spritePriosRatios.x |= regs2.spriteParams.colorCalcRatios[i] << (8 * i + 3);
+
+            params.spritePriosRatios.y |= regs2.spriteParams.priorities[i + 4] << (8 * i);
+            params.spritePriosRatios.y |= regs2.spriteParams.colorCalcRatios[i + 4] << (8 * i + 3);
+        }
+
+        params.vcellScroll.tableAddress = regs2.vcellScrollTableAddress;
+        params.vcellScroll.inc = regs2.vcellScrollInc >> 2u;
+
+        params.windows.spriteWindowLogic = regs2.spriteParams.windowSet.logic == WindowLogic::And;
+        params.windows.spriteW0Enable = regs2.spriteParams.windowSet.enabled[0];
+        params.windows.spriteW0Invert = regs2.spriteParams.windowSet.inverted[0];
+        params.windows.spriteW1Enable = regs2.spriteParams.windowSet.enabled[1];
+        params.windows.spriteW1Invert = regs2.spriteParams.windowSet.inverted[1];
+
+        params.windows.colorCalcWindowLogic = regs2.colorCalcParams.windowSet.logic == WindowLogic::And;
+        params.windows.colorCalcW0Enable = regs2.colorCalcParams.windowSet.enabled[0];
+        params.windows.colorCalcW0Invert = regs2.colorCalcParams.windowSet.inverted[0];
+        params.windows.colorCalcW1Enable = regs2.colorCalcParams.windowSet.enabled[1];
+        params.windows.colorCalcW1Invert = regs2.colorCalcParams.windowSet.inverted[1];
+        params.windows.colorCalcSWEnable = regs2.colorCalcParams.windowSet.enabled[2];
+        params.windows.colorCalcSWInvert = regs2.colorCalcParams.windowSet.inverted[2];
+
+        params.enhancements.deinterlace = enhancements.deinterlace;
+        params.enhancements.transparentMeshes = enhancements.transparentMeshes;
         // TODO: other fields
 
         // NOTE: this is uploaded as 32-bit root constants, not through the upload buffer
@@ -1934,18 +2148,8 @@ struct Direct3D12VDPRenderer::Impl {
 
         const VDP2Regs &regs2 = vdpState.regs2;
 
-        auto condenseBools = [](std::span<const bool> bools) {
-            uint32 value = 0;
-            for (size_t i = 0; i < bools.size(); ++i) {
-                if (bools[i]) {
-                    value |= 1u << i;
-                }
-            }
-            return value;
-        };
-
         // These can be either 0 or 8, but we'll condense them to single bits
-        auto condenseVRAMDataOffsets = [](const std::array<uint32, 4> values) {
+        auto packVRAMDataOffsets = [](const std::array<uint32, 4> values) {
             uint32 value = 0;
             for (size_t i = 0; i < values.size(); ++i) {
                 if (values[i] != 0u) {
@@ -1982,10 +2186,10 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.base.colorCalcEnable = bgParams.colorCalcEnable;
             renderParams.base.extChar = bgParams.extChar;
             renderParams.base.twoWordChar = bgParams.twoWordChar;
-            renderParams.base.patNameAccess = condenseBools(bgParams.patNameAccess);
-            renderParams.base.charPatAccess = condenseBools(bgParams.charPatAccess);
-            renderParams.base.charPatDelay = condenseBools(bgParams.charPatDelay);
-            renderParams.base.vramDataOffset = condenseVRAMDataOffsets(bgParams.vramDataOffset);
+            renderParams.base.patNameAccess = PackBools<HLSLuint>(bgParams.patNameAccess);
+            renderParams.base.charPatAccess = PackBools<HLSLuint>(bgParams.charPatAccess);
+            renderParams.base.charPatDelay = PackBools<HLSLuint>(bgParams.charPatDelay);
+            renderParams.base.vramDataOffset = packVRAMDataOffsets(bgParams.vramDataOffset);
             renderParams.base.specialColorCalcMode = static_cast<HLSLuint>(bgParams.specialColorCalcMode);
             renderParams.base.pageShift = {bgParams.pageShiftH, bgParams.pageShiftV};
             renderParams.base.bitmapBaseAddress = bgParams.bitmapBaseAddress;
@@ -2047,10 +2251,10 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.base.colorCalcEnable = bgParams.colorCalcEnable;
             renderParams.base.extChar = bgParams.extChar;
             renderParams.base.twoWordChar = bgParams.twoWordChar;
-            renderParams.base.patNameAccess = condenseBools(bgParams.patNameAccess);
-            renderParams.base.charPatAccess = condenseBools(bgParams.charPatAccess);
-            renderParams.base.charPatDelay = condenseBools(bgParams.charPatDelay);
-            renderParams.base.vramDataOffset = condenseVRAMDataOffsets(bgParams.vramDataOffset);
+            renderParams.base.patNameAccess = PackBools<HLSLuint>(bgParams.patNameAccess);
+            renderParams.base.charPatAccess = PackBools<HLSLuint>(bgParams.charPatAccess);
+            renderParams.base.charPatDelay = PackBools<HLSLuint>(bgParams.charPatDelay);
+            renderParams.base.vramDataOffset = packVRAMDataOffsets(bgParams.vramDataOffset);
             renderParams.base.specialColorCalcMode = static_cast<HLSLuint>(bgParams.specialColorCalcMode);
             renderParams.base.pageShift = {rotParams.pageShiftH, rotParams.pageShiftV};
             renderParams.base.bitmapBaseAddress = rotParams.bitmapBaseAddress;
@@ -2103,16 +2307,6 @@ struct Direct3D12VDPRenderer::Impl {
         }
         vdp2.composeParamsDirty = false;
 
-        auto condenseBools = [](std::span<const bool> bools) {
-            uint32 value = 0;
-            for (size_t i = 0; i < bools.size(); ++i) {
-                if (bools[i]) {
-                    value |= 1u << i;
-                }
-            }
-            return value;
-        };
-
         const VDP2Regs &regs2 = vdpState.regs2;
 
         auto &params = vdp2.cpuComposeParams;
@@ -2129,8 +2323,8 @@ struct Direct3D12VDPRenderer::Impl {
         params.extendedColorCalc = regs2.colorCalcParams.extendedColorCalcEnable && regs2.TVMD.HRESOn < 2;
         params.blendMode = regs2.colorCalcParams.useAdditiveBlend;
         params.useSecondScreenRatio = regs2.colorCalcParams.useSecondScreenRatio;
-        params.colorOffsetEnable = condenseBools(regs2.colorOffsetEnable);
-        params.colorOffsetSelect = condenseBools(regs2.colorOffsetSelect);
+        params.colorOffsetEnable = PackBools<HLSLuint>(regs2.colorOffsetEnable);
+        params.colorOffsetSelect = PackBools<HLSLuint>(regs2.colorOffsetSelect);
         params.lineColorEnable = 0                                                 //
                                  | (regs2.spriteParams.lineColorScreenEnable << 0) //
                                  | (regs2.bgParams[0].lineColorScreenEnable << 1)  //
@@ -2360,6 +2554,11 @@ struct Direct3D12VDPRenderer::Impl {
             // const bool doubleResH = vdpState.regs2.TVMD.HRESOn & 0b010;
             // const uint32 hresShift = doubleResH ? 1 : 0;
             // const uint32 hres = HRes >> hresShift;
+            // cmdList->SetPipelineState(vdp2.calcRotParamsPSO.GetPointer());
+            // cmdList->SetComputeRootSignature(vdp2.calcRotParamsRootSig.GetPointer());
+            // cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
+            //                                       &vdp2.cpuCommonRenderParams, 0);
+            // cmdList->SetComputeRootDescriptorTable(1, vdp2.calcRotParamsDescs.gpuHandle);
             // vdp2.cmdList->Dispatch(hres / 32, numLines, 1);
         }
 
@@ -2397,7 +2596,6 @@ struct Direct3D12VDPRenderer::Impl {
         auto &cmdList = vdp2.cmdList;
 
         vdp2.cpuCommonRenderParams.startY = vdp2.nextComposeLine;
-        VDP2UpdateCommonRenderParams();
         // TODO: VDP2UploadLineColorBackTexture();
 
         // Transition all compositing resources to compute shading usage
