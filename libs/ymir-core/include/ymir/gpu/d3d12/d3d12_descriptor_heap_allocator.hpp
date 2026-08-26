@@ -188,11 +188,13 @@ public:
         // Merge with subsequent ranges
         ++it;
         while (it != m_freeRanges.end()) {
-            if (freeRange.start + freeRange.length >= it->start) {
-                const UINT mergedLength = it->start + it->length - freeRange.start;
-                freeRange.length = std::max(freeRange.length, mergedLength);
-                it = m_freeRanges.erase(it);
+            if (freeRange.start + freeRange.length < it->start) {
+                // Next range doesn't connect or overlap with current range; cannot merge any further
+                break;
             }
+            const UINT mergedLength = it->start + it->length - freeRange.start;
+            freeRange.length = std::max(freeRange.length, mergedLength);
+            it = m_freeRanges.erase(it);
         }
 
         return true;
