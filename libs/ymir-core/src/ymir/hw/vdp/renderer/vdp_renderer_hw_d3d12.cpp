@@ -752,8 +752,23 @@ struct Direct3D12VDPRenderer::Impl {
         } enhancements;
     };
 
-    /// @brief VDP2 window parameters.
-    struct VDP2WindowParams {
+    /// @brief Global VDP2 window parameters.
+    struct VDP2GlobalWindowParams {
+        // Top-left coordinates
+        HLSLuint2 start;
+
+        // Bottom-right coordinates
+        HLSLuint2 end;
+
+        // Base address of the line window table
+        HLSLuint lineWindowTableAddress;
+
+        // Whether to use the line window table
+        HLSLbool lineWindowTableEnable;
+    };
+
+    /// @brief Per-layer VDP2 window parameters.
+    struct VDP2LayerWindowParams {
         // Window logic
         //   false = OR
         //   true = AND
@@ -773,8 +788,8 @@ struct Direct3D12VDPRenderer::Impl {
     };
 
     /// @brief VDP2 extended window parameters (includes sprite window).
-    struct VDP2WindowParamsS {
-        VDP2WindowParams base;
+    struct VDP2LayerWindowParamsS {
+        VDP2LayerWindowParams base;
 
         // Sprite window enable
         HLSLbool spriteWindowEnable;
@@ -882,21 +897,21 @@ struct Direct3D12VDPRenderer::Impl {
         // Derived from PLSZ.xxPLSZn
         HLSLuint2 pageShift;
 
+        // Bitmap dimensions, when the screen is in bitmap mode.
+        // Derived from CHCTLA/CHCTLB.xxBMSZ
+        HLSLuint2 bitmapSize;
+
         // Base address of bitmap data.
         // Derived from MPOFN (NBG0-3) or MPOFR (RotParam A-B)
         HLSLuint bitmapBaseAddress;
 
         // Window parameters
-        VDP2WindowParamsS windowParams;
+        VDP2LayerWindowParamsS windowParams;
     };
 
     /// @brief VDP2 NBG layer rendering parameters.
     struct NBGParams {
         VDP2BaseBGParams base;
-
-        // Bitmap dimensions, when the screen is in bitmap mode.
-        // Derived from CHCTLA/CHCTLB.xxBMSZ
-        HLSLuint2 bitmapSize;
 
         // Screen scroll amount, in 11.8 fixed-point format.
         // Used in scroll NBGs.
@@ -981,6 +996,14 @@ struct Direct3D12VDPRenderer::Impl {
     struct VDP2LayerRenderParams {
         NBGParams nbg[4];
         RBGParams rbg[2];
+
+        VDP2GlobalWindowParams windows[2];
+
+        // Bit-packed special function code flags.
+        //  bits  use
+        //   0-7  Special function code A
+        //  8-15  Special function code B
+        HLSLuint specialFunctionCodes;
     };
 
     /// @brief VDP2 compositor parameters.
@@ -1774,15 +1797,13 @@ struct Direct3D12VDPRenderer::Impl {
     bool exclusiveMonitor = false;
 
     void VDP2CacheCRAMColor(uint32 address) {
-        // NOTE: 32-bit colors are mapped to even indices to simplify address calculations in shaders
-
         CRAMColorCache &colorCache = vdp2.cpuCRAMColorCache;
-        ColorR8G8B8A8 &color = colorCache[address >> 1u];
         switch (vdpState.regs2.vramControl.colorRAMMode) {
         case 0: { // RGB 5:5:5, half CRAM
             const auto value = vdpState.mem2.ReadCRAM<uint16>(address & ~1u);
             const Color555 color5{.u16 = value};
             const Color888 color8 = ConvertRGB555to888(color5);
+            ColorR8G8B8A8 &color = colorCache[address >> 1u];
             color.r = color8.r;
             color.g = color8.g;
             color.b = color8.b;
@@ -1793,6 +1814,7 @@ struct Direct3D12VDPRenderer::Impl {
             const auto value = vdpState.mem2.ReadCRAM<uint16>(address & ~1u);
             const Color555 color5{.u16 = value};
             const Color888 color8 = ConvertRGB555to888(color5);
+            ColorR8G8B8A8 &color = colorCache[address >> 1u];
             color.r = color8.r;
             color.g = color8.g;
             color.b = color8.b;
@@ -1804,6 +1826,7 @@ struct Direct3D12VDPRenderer::Impl {
         default: {
             const auto value = vdpState.mem2.ReadCRAM<uint32>(address & ~3u);
             const Color888 color8{.u32 = value};
+            ColorR8G8B8A8 &color = colorCache[address >> 2u];
             color.r = color8.r;
             color.g = color8.g;
             color.b = color8.b;
@@ -1814,8 +1837,6 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     void VDP2CacheAllCRAMColors() {
-        // NOTE: 32-bit colors are mapped to even indices to simplify address calculations in shaders
-
         CRAMColorCache &colorCache = vdp2.cpuCRAMColorCache;
         switch (vdpState.regs2.vramControl.colorRAMMode) {
         case 0: // RGB 5:5:5, half CRAM
@@ -1846,10 +1867,10 @@ struct Direct3D12VDPRenderer::Impl {
             for (uint32 i = 0; i < 1024; ++i) {
                 const auto value = vdpState.mem2.ReadCRAM<uint32>(i * sizeof(uint32));
                 const Color888 color8{.u32 = value};
-                colorCache[i << 1u].r = color8.r;
-                colorCache[i << 1u].g = color8.g;
-                colorCache[i << 1u].b = color8.b;
-                colorCache[i << 1u].a = color8.msb;
+                colorCache[i].r = color8.r;
+                colorCache[i].g = color8.g;
+                colorCache[i].b = color8.b;
+                colorCache[i].a = color8.msb;
             }
             break;
         }
@@ -2192,6 +2213,7 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.base.vramDataOffset = packVRAMDataOffsets(bgParams.vramDataOffset);
             renderParams.base.specialColorCalcMode = static_cast<HLSLuint>(bgParams.specialColorCalcMode);
             renderParams.base.pageShift = {bgParams.pageShiftH, bgParams.pageShiftV};
+            renderParams.base.bitmapSize = {bgParams.bitmapSizeH, bgParams.bitmapSizeV};
             renderParams.base.bitmapBaseAddress = bgParams.bitmapBaseAddress;
             renderParams.base.windowParams.base.windowLogicAnd = bgParams.windowSet.logic == WindowLogic::And;
             renderParams.base.windowParams.base.window0Enable = bgParams.windowSet.enabled[0];
@@ -2201,7 +2223,6 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.base.windowParams.spriteWindowEnable = bgParams.windowSet.enabled[2];
             renderParams.base.windowParams.spriteWindowInvert = bgParams.windowSet.inverted[2];
 
-            renderParams.bitmapSize = {bgParams.bitmapSizeH, bgParams.bitmapSizeV};
             renderParams.scrollAmount = {bgParams.scrollAmountH, bgParams.scrollAmountV};
             renderParams.scrollInc = {bgState.scrollIncH, bgParams.scrollIncV};
             renderParams.pageBaseAddresses = bgParams.pageBaseAddresses;
@@ -2271,6 +2292,21 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.pageBaseAddresses[0] = vdpState.state2.rbgPageBaseAddresses[0][i];
             renderParams.pageBaseAddresses[1] = vdpState.state2.rbgPageBaseAddresses[1][i];
         }
+
+        // Windows 0 and 1
+        for (int i = 0; i < 2; ++i) {
+            const WindowParams &windowParams = regs2.windowParams[i];
+            VDP2GlobalWindowParams &renderParams = vdp2.cpuLayerRenderParams.windows[i];
+            renderParams.start = {windowParams.startX, windowParams.startY};
+            renderParams.end = {windowParams.endX, windowParams.endY};
+            renderParams.lineWindowTableAddress = windowParams.lineWindowTableAddress;
+            renderParams.lineWindowTableEnable = windowParams.lineWindowTableEnable;
+        }
+
+        // Special function codes
+        vdp2.cpuLayerRenderParams.specialFunctionCodes =
+            PackBools<uint32>(regs2.specialFunctionCodes[0].colorMatches) |
+            (PackBools<uint32>(regs2.specialFunctionCodes[1].colorMatches) << 8u);
 
         // Update buffer
         {

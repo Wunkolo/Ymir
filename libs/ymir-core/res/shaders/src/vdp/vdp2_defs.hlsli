@@ -58,6 +58,15 @@ static const uint kColorGradScreenNBG1_EXBG = 4;
 static const uint kColorGradScreenNBG2 = 5;
 static const uint kColorGradScreenNBG3 = 6;
 
+static const uint kLayerIndexNBG0 = 0;
+static const uint kLayerIndexNBG1 = 1;
+static const uint kLayerIndexNBG2 = 2;
+static const uint kLayerIndexNBG3 = 3;
+static const uint kLayerIndexRBG0 = 4;
+static const uint kLayerIndexRBG1 = 5;
+static const uint kLayerIndexSprite = 6;
+static const uint kLayerIndexMesh = 7;
+
 static const uint4 kTransparentPixel = uint4(0, 0, 0, 1u << kPixelAttrBitTransparent);
 
 #endif

@@ -29,13 +29,13 @@ struct BaseBGParams {
     uint vramDataOffset;
     uint specialColorCalcMode;
     uint2 pageShift;
+    uint2 bitmapSize;
     uint bitmapBaseAddress;
     LayerWindowParamsS windowParams;
 };
 
 struct NBGParams {
     BaseBGParams base;
-    uint2 bitmapSize;
     uint2 scrollAmount;
     uint2 scrollInc;
     uint pageBaseAddresses[4];
@@ -62,6 +62,8 @@ struct LayerRenderParams {
     RBGParams rbg[2];
 
     GlobalWindowParams windows[2];
+
+    uint specialFunctionCodes;
 };
 
 #endif
