@@ -304,7 +304,7 @@ void DisplayService::ApplyFullscreenMode() const {
 
 void DisplayService::PersistWindowGeometry() {
     const auto &settings = m_settings;
-    if (settings.gui.rememberWindowGeometry) {
+    if (settings.gui.rememberWindowGeometry && !settings.video.fullScreen) {
         int wx, wy, ww, wh;
         const bool posOK = SDL_GetWindowPosition(m_context.screen.window, &wx, &wy);
         const bool sizeOK = SDL_GetWindowSize(m_context.screen.window, &ww, &wh);

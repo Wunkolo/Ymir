@@ -41,6 +41,7 @@ Introduces save state file version 14.
 
 ### Fixes
 
+- App: Don't persist window geometry in full screen mode.
 - Backup RAM: Fix crash when attempting to load a backup RAM cartridge with the default path.
 - CD Block (HLE): Report current CD status and raise CMOK HIRQ signal when processing unimplemented commands.
 - CD Block (HLE): Read reset position flag correctly from parameters.
