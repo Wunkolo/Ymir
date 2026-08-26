@@ -311,14 +311,6 @@ uint4 DrawNBG(uint2 pos, // pixel coordinates
         // TODO: return FetchScrollNBGPixel(params, scrollPos);
         return uint4(scrollPos.xy, 0, 128);
     }
-
-    const uint value = vram.Load(pos.x * 4 + pos.y * 1024);
-    return uint4(
-        BitExtract(value, 0, 8) ^ index,
-        BitExtract(value, 8, 8) ^ index,
-        BitExtract(value, 16, 8) ^ index,
-        BitExtract(value, 24, 8) ^ index
-    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
