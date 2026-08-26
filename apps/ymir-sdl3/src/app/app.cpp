@@ -687,6 +687,29 @@ void App::RunEmulator() {
             in >> windowX >> windowY >> windowWidth >> windowHeight;
             if (in) {
                 initGeometry = false;
+
+                int numDisplays = 0;
+                SDL_DisplayID *displayIDs = SDL_GetDisplays(&numDisplays);
+                if (displayIDs != nullptr) {
+                    util::ScopeGuard sgFreeDisplayIDs{[&] { SDL_free(displayIDs); }};
+
+                    // If the window geometry happens to exactly match a display's bounds, reset it
+                    SDL_Rect displayRect{};
+                    for (int i = 0; i < numDisplays; ++i) {
+                        if (SDL_GetDisplayBounds(displayIDs[i], &displayRect)) {
+                            if (windowX == displayRect.x && windowY == displayRect.y && windowWidth == displayRect.w &&
+                                windowHeight == displayRect.h) {
+                                const char *displayName = SDL_GetDisplayName(displayIDs[i]);
+                                devlog::info<grp::base>(
+                                    "Window geometry matches the bounds of display {} and will be reset", displayName);
+                                devlog::info<grp::base>("{} bounds: {}x{} - {}x{}", displayName, displayRect.x,
+                                                        displayRect.y, displayRect.w, displayRect.h);
+                                initGeometry = true;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
 
