@@ -648,32 +648,32 @@ struct Direct3D12VDPRenderer::Impl {
             HLSLuint borderColorMode : 1;      //     1  Border color mode
                                                //          0 = black
                                                //          1 = back screen color
-            HLSLuint interlaceMode : 2;        //   2-4  Interlace mode
+            HLSLuint interlaceMode : 2;        //   2-3  Interlace mode
                                                //          0 = progressive
                                                //          1 = invalid
                                                //          2 = single-density interlace
                                                //          3 = double-density interlace
-            HLSLuint oddField : 1;             //     5  Field
+            HLSLuint oddField : 1;             //     4  Field
                                                //          0 = even
                                                //          1 = odd
-            HLSLuint exclusiveMonitor : 1;     //     6  Exclusive monitor mode
+            HLSLuint exclusiveMonitor : 1;     //     5  Exclusive monitor mode
                                                //          0 = normal
                                                //          1 = exclusive
-            HLSLuint colorRAMMode : 2;         //   7-8  Color RAM mode
+            HLSLuint colorRAMMode : 2;         //   6-7  Color RAM mode
                                                //          0 = RGB 5:5:5, 1024 words
                                                //          1 = RGB 5:5:5, 2048 words
                                                //          2 = RGB 8:8:8, 1024 words
                                                //          3 = RGB 8:8:8, 1024 words  (same as mode 2, undocumented)
-            HLSLuint hiResH : 1;               //     9  Horizontal resolution
+            HLSLuint hiResH : 1;               //     8  Horizontal resolution
                                                //          0 = 320/352
                                                //          1 = 640/704
-            HLSLuint palMode : 1;              //    10  Display standard (VDP2 TVSTAT.PAL)
+            HLSLuint palMode : 1;              //     9  Display standard (VDP2 TVSTAT.PAL)
                                                //          0 = NTSC
                                                //          1 = PAL
-            HLSLuint hresMode : 3;             // 11-13  Horizontal resolution mode (VDP2 TVMD.HRESO2-0)
-            HLSLuint vresMode : 2;             // 14-15  Vertical resolution mode   (VDP2 TVMD.VRESO1-0)
-            HLSLuint dblInterlaceEnable : 1;   //    16  VDP1 double interlace enable flag (VDP1 FBCR.DIE)
-            HLSLuint dblInterlaceDrawLine : 1; //    17  VDP1 double interlace draw line   (VDP1 FBCR.DIL)
+            HLSLuint hresMode : 3;             // 10-12  Horizontal resolution mode (VDP2 TVMD.HRESO2-0)
+            HLSLuint vresMode : 2;             // 13-14  Vertical resolution mode   (VDP2 TVMD.VRESO1-0)
+            HLSLuint dblInterlaceEnable : 1;   //    15  VDP1 double interlace enable flag (VDP1 FBCR.DIE)
+            HLSLuint dblInterlaceDrawLine : 1; //    16  VDP1 double interlace draw line   (VDP1 FBCR.DIL)
         } displayParams;
 
         struct {                              //  bits  use
