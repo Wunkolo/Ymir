@@ -10,12 +10,15 @@ struct RotRegs {
     bool coeffTableCRAM;
     uint coeffDataSize;
     uint coeffDataMode;
-    bool coeffDataAccessA0;
-    bool coeffDataAccessA1;
-    bool coeffDataAccessB0;
-    bool coeffDataAccessB1;
+    uint coeffDataAccess;
     bool coeffDataPerDot;
     bool coeffUseLineColorData;
+};
+
+struct RotParamBase {
+    uint tableAddress;
+    int Xst, Yst;
+    uint KA;
 };
 
 struct RotParamState {

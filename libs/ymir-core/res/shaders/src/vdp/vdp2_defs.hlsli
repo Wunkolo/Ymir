@@ -40,6 +40,11 @@ static const uint kRotParamModeB = 1;
 static const uint kRotParamModeCoeff = 2;
 static const uint kRotParamModeWindow = 3;
 
+static const uint kCoeffDataModeScaleCoeffXY = 0;
+static const uint kCoeffDataModeScaleCoeffX = 1;
+static const uint kCoeffDataModeScaleCoeffY = 2;
+static const uint kCoeffDataModeViewpointX = 3;
+
 static const uint kScreenOverProcessRepeat = 0;
 static const uint kScreenOverProcessRepeatChar = 1;
 static const uint kScreenOverProcessTransparent = 2;

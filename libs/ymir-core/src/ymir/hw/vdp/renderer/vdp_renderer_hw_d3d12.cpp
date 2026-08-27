@@ -825,17 +825,13 @@ struct Direct3D12VDPRenderer::Impl {
         //   3 = Px
         HLSLuint coeffDataMode;
 
-        // Coefficient data access for VRAM bank A0/A
-        HLSLbool coeffDataAccessA0;
-
-        // Coefficient data access for VRAM bank A1
-        HLSLbool coeffDataAccessA1;
-
-        // Coefficient data access for VRAM bank B0/B
-        HLSLbool coeffDataAccessB0;
-
-        // Coefficient data access for VRAM bank B1
-        HLSLbool coeffDataAccessB1;
+        // Coefficient data access for VRAM banks:
+        //  bit  bank
+        //    0  A0/A
+        //    1  A1
+        //    2  B0/B
+        //    3  B1
+        HLSLuint coeffDataAccess;
 
         // Per-dot coefficients
         //   false = per line
@@ -2604,12 +2600,19 @@ struct Direct3D12VDPRenderer::Impl {
             dst.coeffTableCRAM = vramCtl.colorRAMCoeffTableEnable;
             dst.coeffDataSize = src.coeffDataSize;
             dst.coeffDataMode = static_cast<HLSLuint>(src.coeffDataMode);
-            dst.coeffDataAccessA0 = isCoeff(vramCtl.rotDataBankSelA0);
-            dst.coeffDataAccessA1 =
-                isCoeff(vramCtl.partitionVRAMA ? vramCtl.rotDataBankSelA1 : vramCtl.rotDataBankSelA0);
-            dst.coeffDataAccessB0 = isCoeff(vramCtl.rotDataBankSelB0);
-            dst.coeffDataAccessB1 =
-                isCoeff(vramCtl.partitionVRAMB ? vramCtl.rotDataBankSelB1 : vramCtl.rotDataBankSelB0);
+            dst.coeffDataAccess = 0;
+            if (isCoeff(vramCtl.rotDataBankSelA0)) {
+                dst.coeffDataAccess |= 1u << 0u;
+            }
+            if (isCoeff(vramCtl.partitionVRAMA ? vramCtl.rotDataBankSelA1 : vramCtl.rotDataBankSelA0)) {
+                dst.coeffDataAccess |= 1u << 1u;
+            }
+            if (isCoeff(vramCtl.rotDataBankSelB0)) {
+                dst.coeffDataAccess |= 1u << 2u;
+            }
+            if (isCoeff(vramCtl.partitionVRAMB ? vramCtl.rotDataBankSelB1 : vramCtl.rotDataBankSelB0)) {
+                dst.coeffDataAccess |= 1u << 3u;
+            }
             dst.coeffDataPerDot = vramCtl.perDotRotationCoeffs;
         }
 
