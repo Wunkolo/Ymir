@@ -6,8 +6,6 @@
 #include "util/bit_ops.hlsli"
 #include "util/data_ops.hlsli"
 
-#include "intellisense_compat.hlsli"
-
 cbuffer CommonRenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
 }
@@ -19,6 +17,11 @@ ByteAddressBuffer cramCoeff : register(t4);
 
 RWStructuredBuffer<RotParamState> rotParamsOut : register(u0);
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Parameters
+
+static const bool fbRotEnable = BitTest(g_commonParams.spriteParams, 11);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Table fetching
@@ -166,12 +169,7 @@ RotCoefficient ReadRotCoefficient(const RotRegs regs, uint coeffAddress) {
 
 RotParamState CalcRotation(uint2 pos, uint index) {
     const RotParamBase base = rotParamBases[index * kMaxNormalResV + pos.y + g_commonParams.startY];
-    const uint2 regs = rotRegs[index];
-
-    const bool coeffTableEnable = BitTest(regs.x, 0);
-    const uint coeffDataMode = BitExtract(regs.x, 3, 2);
-    const bool coeffDataPerDot = BitTest(regs.x, 9);
-    const bool fbRotEnable = BitTest(regs.x, 11);
+    const RotRegs regs = rotRegs[index];
 
     const RotTable t = ReadRotTable(base.tableAddress);
 
@@ -194,8 +192,8 @@ RotParamState CalcRotation(uint2 pos, uint index) {
     // 10*(10-10) + 10*(10-10) + 10*(10-10) = 20 frac bits
     // 14*(23-24) + 14*(23-24) + 14*(23-24) = 38 total bits
     // reduce to 10 frac bits
-    const int Xsp = (int64_t(t.A) * int64_t(Tx) + int64_t(t.B) * int64_t(Ty) + int64_t(t.C) * int64_t(Tz)) >> 10;
-    const int Ysp = (int64_t(t.D) * int64_t(Tx) + int64_t(t.E) * int64_t(Ty) + int64_t(t.F) * int64_t(Tz)) >> 10;
+    const int Xsp = int((int64_t(t.A) * int64_t(Tx) + int64_t(t.B) * int64_t(Ty) + int64_t(t.C) * int64_t(Tz)) >> 10);
+    const int Ysp = int((int64_t(t.D) * int64_t(Tx) + int64_t(t.E) * int64_t(Ty) + int64_t(t.F) * int64_t(Tz)) >> 10);
 
     // Transformed view coordinates (18.10)
     // 10*(0-0) + 10*(0-0) + 10*(0-0) + 10 + 10 = 10+10+10 + 10+10 = 10 frac bits
@@ -217,15 +215,15 @@ RotParamState CalcRotation(uint2 pos, uint index) {
     int ky = t.ky;
 
     RotCoefficient coeff;
-    if (coeffTableEnable) {
+    if (regs.coeffTableEnable) {
         // Current coefficient address (16.10)
-        const uint KAxofs = coeffDataPerDot ? pos.x * t.dKAx : 0;
+        const uint KAxofs = regs.coeffDataPerDot ? pos.x * t.dKAx : 0;
         const uint KA = base.KA + KAxofs;
 
         // Read and apply rotation coefficient
         coeff = ReadRotCoefficient(regs, KA);
 
-        switch (coeffDataMode) {
+        switch (regs.coeffDataMode) {
             case kCoeffDataModeScaleCoeffXY:
                 kx = ky = coeff.value;
                 break;

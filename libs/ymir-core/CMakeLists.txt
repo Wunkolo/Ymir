@@ -396,6 +396,7 @@ set(SHADER_INPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/res/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 
 set(COMPUTE_SHADER_SOURCES
+    res/shaders/src/vdp/vdp2_calc_rotparams_cs.hlsl
     res/shaders/src/vdp/vdp2_compose_cs.hlsl
     res/shaders/src/vdp/vdp2_render_bgs_cs.hlsl
 )
@@ -421,6 +422,20 @@ foreach (SHADER_SRC ${COMPUTE_SHADER_SOURCES})
     )
     list(APPEND COMPILED_SHADERS ${SHADER_BINARY_FILES})
 endforeach ()
+
+# Configure properties for shader source files in Visual Studio
+if (WIN32)
+    message(STATUS "Configuring shader source properties for Visual Studio")
+    message(STATUS "Shaders: ${COMPUTE_SHADER_SOURCES}")
+    set_source_files_properties(
+        ${COMPUTE_SHADER_SOURCES}
+        PROPERTIES
+            VS_SHADER_TYPE "Compute"
+            VS_SHADER_MODEL "6.0"
+            VS_SHADER_ENTRYPOINT "CSMain"
+    )
+endif ()
+
 
 ## Create the embedded shaders target
 MESSAGE(STATUS "Generating core shader resource library: ${COMPILED_SHADERS}")
