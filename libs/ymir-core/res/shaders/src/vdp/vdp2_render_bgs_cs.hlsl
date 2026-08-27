@@ -1,5 +1,6 @@
 #include "vdp2_common_params.hlsli"
 #include "vdp2_render_params_layer.hlsli"
+#include "vdp2_render_params_rotation.hlsli"
 
 #include "vdp2_defs.hlsli"
 
@@ -10,11 +11,15 @@ cbuffer CommonRenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
 }
 
-ByteAddressBuffer vram : register(t1);
-Buffer<uint4> cramColor : register(t2);
-StructuredBuffer<LayerRenderParams> layerParams : register(t3);
+StructuredBuffer<LayerRenderParams> layerParams : register(t1);
+StructuredBuffer<RotRegs> rotRegs : register(t2);
+ByteAddressBuffer vram : register(t3);
+Buffer<uint4> cramColor : register(t4);
+StructuredBuffer<RotParamState> rotParamStates : register(t5);
 
-RWTexture2DArray<uint4> bgOut : register(u0);
+RWTexture2DArray<uint4> layerOut : register(u0);
+RWTexture2DArray<uint4> rbgLineColorOut : register(u1);
+
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -105,7 +110,7 @@ bool InsideWindow(GlobalWindowParams window, bool invert, uint2 pos) {
 }
 
 bool InsideSpriteWindow(bool invert, uint2 pos) {
-    return BitTest(bgOut[uint3(pos, kLayerIndexSprite)].a, kPixelAttrBitSpriteShadowWindow) != invert;
+    return BitTest(layerOut[uint3(pos, kLayerIndexSprite)].a, kPixelAttrBitSpriteShadowWindow) != invert;
 }
 
 bool InsideWindows(LayerWindowParams layerWindows, uint2 pos) {
@@ -217,7 +222,7 @@ bool IsSpecialColorCalcMatch(uint specFuncSelect, uint specColorCode) {
     return BitTest(layerParams[0].specialFunctionCodes, specFuncSelect * 8 + specColorCode);
 }
 
-bool GetSpecialColorCalcFlag(BaseBGParams params, uint specColorCode, bool specColorCalc, bool colorMSB) {
+bool GetSpecialColorCalcFlag(const BaseBGParams params, uint specColorCode, bool specColorCalc, bool colorMSB) {
     const bool colorCalcEnable = params.colorCalcEnable;
     if (!colorCalcEnable) {
         return false;
@@ -250,7 +255,7 @@ struct Character {
 };
 static const Character kBlankCharacter = (Character) 0;
 
-Character ExtractOneWordCharacter(BaseBGParams params, uint charData) {
+Character ExtractOneWordCharacter(const BaseBGParams params, uint charData) {
     const bool extChar = params.extChar;
     const uint cellSizeShift = params.cellSizeShift;
 
@@ -284,7 +289,7 @@ Character ExtractOneWordCharacter(BaseBGParams params, uint charData) {
     return ch;
 }
 
-Character FetchTwoWordCharacter(BaseBGParams params, uint pageAddress, uint charIndex) {
+Character FetchTwoWordCharacter(const BaseBGParams params, uint pageAddress, uint charIndex) {
     const uint charAddress = pageAddress + charIndex * 4;
     const uint charBank = BitExtract(charAddress, 17, 2);
 
@@ -304,7 +309,7 @@ Character FetchTwoWordCharacter(BaseBGParams params, uint pageAddress, uint char
     return ch;
 }
 
-Character FetchOneWordCharacter(BaseBGParams params, uint pageAddress, uint charIndex) {
+Character FetchOneWordCharacter(const BaseBGParams params, uint pageAddress, uint charIndex) {
     const uint charAddress = pageAddress + charIndex * 2;
     const uint charBank = BitExtract(charAddress, 17, 2);
     if (!BitTest(params.patNameAccess, charBank)) {
@@ -318,7 +323,7 @@ Character FetchOneWordCharacter(BaseBGParams params, uint pageAddress, uint char
 // ---------------------------------------------------------------------------------------------------------------------
 // Pixel fetching
 
-uint4 FetchPixel(BaseBGParams params, uint baseAddress, uint2 dotPos, uint linePitch, bool applyVRAMDelay, uint palNum, bool specColorCalc, uint specPriority) {
+uint4 FetchPixel(const BaseBGParams params, uint baseAddress, uint2 dotPos, uint linePitch, bool applyVRAMDelay, uint palNum, bool specColorCalc, uint specPriority) {
     const uint charPatAccess = params.charPatAccess;
     const uint colorFormat = params.colorFormat;
     const uint cramOffset = params.cramOffset;
@@ -409,7 +414,7 @@ uint4 FetchPixel(BaseBGParams params, uint baseAddress, uint2 dotPos, uint lineP
     );
 }
 
-uint4 FetchCharacterPixel(BaseBGParams params, Character ch, uint2 dotPos, uint cellIndex) {
+uint4 FetchCharacterPixel(const BaseBGParams params, Character ch, uint2 dotPos, uint cellIndex) {
     const uint bank = BitExtract(ch.charNum << 5, 17, 2);
     const uint cellSizeShift = params.cellSizeShift;
     const uint colorFormat = params.colorFormat;
@@ -444,7 +449,7 @@ uint4 FetchCharacterPixel(BaseBGParams params, Character ch, uint2 dotPos, uint 
     return FetchPixel(params, baseAddress, dotPos, 8, false, ch.palNum, ch.specColorCalc, ch.specPriority);
 }
 
-uint4 FetchBitmapPixel(BaseBGParams params, uint2 scrollPos) {
+uint4 FetchBitmapPixel(const BaseBGParams params, uint2 scrollPos) {
     const uint2 bitmapSize = params.bitmapSize;
 
     const uint2 dotPos = scrollPos & (bitmapSize - 1u);
@@ -456,7 +461,7 @@ uint4 FetchBitmapPixel(BaseBGParams params, uint2 scrollPos) {
     return FetchPixel(params, baseAddress, dotPos, bitmapSize.x, true, palNum, specColorCalc, specPriority);
 }
 
-uint4 FetchScrollBGPixel(BaseBGParams params, uint2 scrollPos, uint2 pageShift, bool rot, uint pageBaseAddresses[16]) {
+uint4 FetchScrollBGPixel(const BaseBGParams params, uint2 scrollPos, uint2 pageShift, bool rot, uint pageBaseAddresses[16]) {
     const uint planeShift = rot ? 2 : 1;
     const uint planeMask = (1u << planeShift) - 1u;
 
@@ -503,7 +508,7 @@ uint4 FetchScrollBGPixel(BaseBGParams params, uint2 scrollPos, uint2 pageShift, 
     return FetchCharacterPixel(params, ch, dotPos, cellIndex);
 }
 
-uint4 FetchScrollNBGPixel(BaseBGParams params, uint2 scrollPos, uint pageBaseAddresses[4]) {
+uint4 FetchScrollNBGPixel(const BaseBGParams params, uint2 scrollPos, uint pageBaseAddresses[4]) {
     uint pbaResized[16];
     for (int i = 0; i < 4; i++) {
         pbaResized[i] = pageBaseAddresses[i];
@@ -512,7 +517,7 @@ uint4 FetchScrollNBGPixel(BaseBGParams params, uint2 scrollPos, uint pageBaseAdd
     return FetchScrollBGPixel(params, scrollPos, params.pageShift, false, pbaResized);
 }
 
-uint4 FetchScrollRBGPixel(BaseBGParams params, uint2 scrollPos, uint2 pageShift, uint pageBaseAddresses[16]) {
+uint4 FetchScrollRBGPixel(const BaseBGParams params, uint2 scrollPos, uint2 pageShift, uint pageBaseAddresses[16]) {
     return FetchScrollBGPixel(params, scrollPos, pageShift, true, pageBaseAddresses);
 }
 
@@ -522,7 +527,7 @@ uint4 FetchScrollRBGPixel(BaseBGParams params, uint2 scrollPos, uint2 pageShift,
 uint4 DrawNBG(uint2 pos, // pixel coordinates
               uint index // NBG index (0 to 3)
              ) {
-    NBGParams params = layerParams[0].nbg[index];
+    const NBGParams params = layerParams[0].nbg[index];
     if (!params.base.enabled) {
         return kTransparentPixel;
     }
@@ -652,14 +657,193 @@ uint4 DrawNBG(uint2 pos, // pixel coordinates
 // ---------------------------------------------------------------------------------------------------------------------
 // RBG drawing
 
+uint GetRotIndex(uint2 pos, uint paramIndex) {
+    return pos.x + pos.y * kRotParamLinePitch + paramIndex * kRotParamEntryStride;
+}
+
+uint SelectRotationParameter(const RBGParams params, uint2 pos) {
+    const uint rotParamMode = BitExtract(g_commonParams.layerParams, 22, 2);
+    switch (rotParamMode) {
+        case kRotParamModeA:
+            return kRotParamA;
+        case kRotParamModeB:
+            return kRotParamB;
+        case kRotParamModeCoeff:{
+                if (!rotRegs[0].coeffTableEnable) {
+                    return kRotParamA;
+                }
+                const uint rotIndex = GetRotIndex(pos, 0);
+                const uint coeffData = rotParamStates[rotIndex].coeffData;
+                const bool transparent = BitTest(coeffData, 7);
+                return transparent ? kRotParamB : kRotParamA;
+            }
+        case kRotParamModeWindow:
+            return InsideWindows(layerParams[0].rotWindows, pos) ? kRotParamB : kRotParamA;
+    }
+    return kRotParamA; // shouldn't happen
+}
+
+void StoreRotationLineColorData(uint2 pos, uint2 rotPos, uint index, uint rotSel) {
+    const bool lineColorEnabled = BitTest(g_commonParams.layerParams, 12 + index);
+    if (!lineColorEnabled) {
+        return;
+    }
+
+    const uint rotParamMode = BitExtract(g_commonParams.layerParams, 22, 2);
+    const bool hasRBG1 = BitTest(g_commonParams.layerParams, 13);
+
+    bool useCoeffLineColor = false;
+    uint coeffSel;
+
+    switch (rotParamMode) {
+        case kRotParamModeA:
+            useCoeffLineColor = rotSel == kRotParamA;
+            coeffSel = kRotParamA;
+            break;
+        case kRotParamModeB:
+            useCoeffLineColor = rotSel == kRotParamB;
+            coeffSel = hasRBG1 ? kRotParamA : kRotParamB;
+            break;
+        case kRotParamModeCoeff:
+            useCoeffLineColor = true;
+            coeffSel = kRotParamA;
+            break;
+        case kRotParamModeWindow:
+            useCoeffLineColor = true;
+            coeffSel = hasRBG1 ? kRotParamA : rotSel;
+            break;
+    }
+
+    const bool lineColorPerLine = layerParams[0].lineScreenParams.perLine;
+    const uint lineColorBaseAddress = layerParams[0].lineScreenParams.baseAddress;
+
+    const uint lineColorY = lineColorPerLine ? pos.y : 0;
+    const uint lineColorAddress = lineColorBaseAddress + lineColorY * 2;
+
+    uint cramAddress = Read16(vram, lineColorAddress);
+
+    if (useCoeffLineColor) {
+        const RotRegs regs = rotRegs[coeffSel];
+        if (regs.coeffTableEnable && regs.coeffUseLineColorData) {
+            const uint baseLineColorData = BitExtract(cramAddress, 7, 4);
+
+            const uint rotIndex = GetRotIndex(rotPos.xy, coeffSel);
+            const uint lineColorData = BitExtract(rotParamStates[rotIndex].coeffData, 0, 7);
+
+            cramAddress = (baseLineColorData << 7) | lineColorData;
+        }
+    }
+
+    rbgLineColorOut[uint3(pos.xy, index)] = cramColor[cramAddress];
+}
+
+uint4 DrawScrollRBG(uint2 pos, uint index, uint rotSel) {
+    const RBGParams params = layerParams[0].rbg[index];
+
+    uint2 rotPos = pos;
+    if (params.base.mosaicEnable) {
+        const uint mosaicH = BitExtract(g_commonParams.layerParams, 14, 4) + 1;
+        rotPos.x -= rotPos.x % mosaicH;
+    }
+
+    const RBGParams rotParams = layerParams[0].rbg[rotSel];
+    const uint2 pageShift = rotParams.base.pageShift;
+
+    const uint rotIndex = GetRotIndex(rotPos, rotSel);
+    const RotParamState rotState = rotParamStates[rotIndex];
+
+    // Determine maximum coordinates and screen over process
+    const uint screenOverProcess = rotParams.screenOverProcess;
+    const bool usingFixed512 = screenOverProcess == kScreenOverProcessFixed512;
+    const bool usingRepeat = screenOverProcess == kScreenOverProcessRepeat;
+    const uint2 scrollSize = usingFixed512
+        ? uint2(512, 512)
+        : uint2(512 * 4, 512 * 4) << pageShift;
+
+    const uint2 scrollPos = rotState.screenCoords;
+    if (all(scrollPos < scrollSize) || usingRepeat) {
+        StoreRotationLineColorData(pos, rotPos, index, rotSel);
+
+        return FetchScrollRBGPixel(params.base, scrollPos, pageShift, params.pageBaseAddresses[rotSel]);
+    }
+
+    // Out of bounds
+
+    if (screenOverProcess == kScreenOverProcessRepeatChar) {
+        StoreRotationLineColorData(pos, rotPos, index, rotSel);
+
+        const uint2 dotPos = scrollPos & 7;
+        Character ch = ExtractOneWordCharacter(params.base, rotParams.screenOverPatternName);
+        return FetchCharacterPixel(params.base, ch, dotPos, 0);
+    }
+
+    return kTransparentPixel;
+}
+
+uint4 DrawBitmapRBG(uint2 pos, uint index, uint rotSel) {
+    const RBGParams params = layerParams[0].rbg[index];
+    const uint screenOverProcess = params.screenOverProcess;
+
+    uint2 rotPos = pos;
+    if (params.base.mosaicEnable) {
+        const uint mosaicH = BitExtract(g_commonParams.layerParams, 14, 4) + 1;
+        rotPos.x -= rotPos.x % mosaicH;
+    }
+
+    const uint2 pageShift = layerParams[0].rbg[rotSel].base.pageShift;
+
+    const uint rotIndex = GetRotIndex(rotPos, rotSel);
+    const RotParamState rotState = rotParamStates[rotIndex];
+
+    // Determine maximum coordinates and screen over process
+    const bool usingFixed512 = screenOverProcess == kScreenOverProcessFixed512;
+    const bool usingRepeat = screenOverProcess == kScreenOverProcessRepeat;
+    const uint2 scrollSize = usingFixed512
+        ? uint2(512, 512)
+        : uint2(512 * 4, 512 * 4) << pageShift;
+
+    const uint2 scrollPos = rotState.screenCoords;
+    if (all(scrollPos < scrollSize) || usingRepeat) {
+        StoreRotationLineColorData(pos, rotPos, index, rotSel);
+
+        return FetchBitmapPixel(params.base, scrollPos);
+    }
+
+    return kTransparentPixel;
+}
+
 uint4 DrawRBG(uint2 pos, // pixel coordinates
               uint index // RBG index (0 to 1)
              ) {
-    RBGParams params = layerParams[0].rbg[index];
+    const RBGParams params = layerParams[0].rbg[index];
     if (!params.base.enabled) {
         return kTransparentPixel;
     }
-    return uint4(pos.x, pos.y, index, 1);
+
+    if (hiResH) {
+        pos.x >>= 1;
+    }
+    if (deinterlace && interlaceMode >= kInterlaceModeSingleDensity) {
+        pos.y >>= 1;
+    }
+
+    if (InsideWindows(params.base.windowParams, pos)) {
+        return kTransparentPixel;
+    }
+
+    const uint rotSel = index == 0 ? SelectRotationParameter(params, pos) : kRotParamB;
+    const uint rotIndex = GetRotIndex(pos, rotSel);
+    const RotParamState rotState = rotParamStates[rotIndex];
+
+    // Handle transparent pixels in coefficient table
+    const bool coeffTableEnable = rotRegs[rotSel].coeffTableEnable;
+    if (coeffTableEnable && BitTest(rotState.coeffData, 7)) {
+        return kTransparentPixel;
+    }
+
+    return params.base.bitmap
+        ? DrawBitmapRBG(pos, index, rotSel)
+        : DrawScrollRBG(pos, index, rotSel);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -670,8 +854,8 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint3 outCoord = uint3(drawCoord.x, GetY(drawCoord.y, false), id.z);
     if (id.z <= 3) {
-        bgOut[outCoord] = DrawNBG(drawCoord, id.z);
+        layerOut[outCoord] = DrawNBG(drawCoord, id.z);
     } else if (id.z <= 5) {
-        bgOut[outCoord] = DrawRBG(drawCoord, id.z - 4);
+        layerOut[outCoord] = DrawRBG(drawCoord, id.z - 4);
     }
 }

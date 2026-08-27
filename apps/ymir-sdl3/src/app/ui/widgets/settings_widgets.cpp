@@ -93,12 +93,15 @@ namespace settings::video {
         auto &videoSettings = settings.video;
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Graphics backend:");
-        widgets::ExplanationTooltip("Select the graphics API used to render the GUI.\n"
-                                    //"Affects availability of additional features such as GPU rendering and shaders.\n"
-                                    "\n"
-                                    "Changes are applied immediately. If the new graphics backend fails to initialize, "
-                                    "this option automatically reverts to the last working backend option.",
-                                    ctx.displayScale);
+        widgets::ExplanationTooltip(
+            "Select the graphics API used to render the GUI.\n"
+            "Affects availability of additional features such as GPU rendering and shaders.\n"
+            "\n"
+            "Changes are applied immediately. If the new graphics backend fails to initialize, this option "
+            "automatically reverts to the last working backend option.\n"
+            "\n"
+            "SDL Renderer is offered as a fallback option and will not support any advanced graphics features.",
+            ctx.displayScale);
         ImGui::SameLine();
         if (ImGui::BeginCombo("##graphics_backend", gfx::GraphicsBackendName(videoSettings.graphicsBackend),
                               ImGuiComboFlags_HeightLarge | ImGuiComboFlags_WidthFitPreview)) {

@@ -697,6 +697,11 @@ struct Direct3D12VDPRenderer::Impl {
             HLSLuint lineColorEnableRBG1 : 1; //    13  Line color screen enable for RBG1
             HLSLuint mosaicH : 4;             // 14-17  Horizontal mosaic size (minus one)
             HLSLuint mosaicV : 4;             // 18-21  Vertical mosaic size (minus one)
+            HLSLuint rotParamMode : 2;        // 22-23  Rotation parameter mode
+                                              //          0 = always use A
+                                              //          1 = always use B
+                                              //          2 = select based on coefficient data
+                                              //          3 = select based on window flag
         } layerParams;
 
         struct {                          //  bits  use
@@ -796,6 +801,64 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Sprite window invert
         HLSLbool spriteWindowInvert;
+    };
+
+    /// @brief Rotation parameter registers.
+    struct VDP2RotRegs {
+        // Coefficient table enabled
+        HLSLbool coeffTableEnable;
+
+        // Coefficient table location
+        //   0 = VRAM
+        //   1 = CRAM
+        HLSLbool coeffTableCRAM;
+
+        // Coefficient data size
+        //   0 = 2 words
+        //   1 = 1 word
+        HLSLuint coeffDataSize;
+
+        // Coefficient data mode
+        //   0 = kx/ky
+        //   1 = kx
+        //   2 = ky
+        //   3 = Px
+        HLSLuint coeffDataMode;
+
+        // Coefficient data access for VRAM bank A0/A
+        HLSLbool coeffDataAccessA0;
+
+        // Coefficient data access for VRAM bank A1
+        HLSLbool coeffDataAccessA1;
+
+        // Coefficient data access for VRAM bank B0/B
+        HLSLbool coeffDataAccessB0;
+
+        // Coefficient data access for VRAM bank B1
+        HLSLbool coeffDataAccessB1;
+
+        // Per-dot coefficients
+        //   false = per line
+        //   true  = per dot
+        HLSLbool coeffDataPerDot;
+
+        // Use coefficient line color data
+        HLSLbool coeffUseLineColorData;
+    };
+
+    /// @brief Per-pixel rotation parameter states.
+    struct VDP2RotParamState {
+        /// @brief Output screen coordinates.
+        HLSLint2 screenCoords;
+
+        /// @brief Output sprite coordinates.
+        HLSLuint2 spriteCoords;
+
+        /// @brief Coefficient data.
+        ///  bits  use
+        ///   0-6  raw line color data
+        ///     7  transparency
+        HLSLuint coeffData;
     };
 
     /// @brief Base VDP2 layer rendering parameters, common to NBGs and RBGs.
@@ -992,12 +1055,28 @@ struct Direct3D12VDPRenderer::Impl {
         std::array<std::array<HLSLuint, 16>, 2> pageBaseAddresses;
     };
 
+    /// @brief LNCL/BACK screen parameters.
+    struct VDP2LineBackScreenParams {
+        // Base address of color data
+        HLSLuint baseAddress;
+
+        // Use colors per line
+        //   false = per screen
+        //   true   = per line
+        HLSLbool perLine;
+    };
+
     /// @brief VDP2 layer rendering parameters.
     struct VDP2LayerRenderParams {
         NBGParams nbg[4];
         RBGParams rbg[2];
 
         VDP2GlobalWindowParams windows[2];
+
+        VDP2LayerWindowParams rotWindows;
+
+        VDP2LineBackScreenParams lineScreenParams;
+        VDP2LineBackScreenParams backScreenParams;
 
         // Bit-packed special function code flags.
         //  bits  use
@@ -1184,6 +1263,13 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief Layer outputs UAV (offline).
         DescriptorRange layerOutUAV;
 
+        /// @brief 2D texture array for RBG0-1 line color outputs (in that order).
+        D3D12Resource rbgLineColorOutTexture;
+        /// @brief RBG0-1 line color outputs SRV (offline).
+        DescriptorRange rbgLineColorOutSRV;
+        /// @brief RBG0-1 line color outputs UAV (offline).
+        DescriptorRange rbgLineColorOutUAV;
+
         /// @brief LNCL/BACK screen texture.
         /// 2D texture with X=0->LNCL, X=1->BACK, and Y being each scanline.
         D3D12Resource lnclBackTexture;
@@ -1192,12 +1278,26 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief CPU-side LNCL/BACK screen texture (0,y=LNCL; 1,y=BACK).
         std::array<std::array<ColorR8G8B8A8, 2>, kMaxResV> cpuLnclBack{};
 
+        /// @brief VDP2 rotation registers buffer.
+        D3D12Resource rotRegsBuffer;
+        /// @brief VDP2 rotation registers buffer SRV (offline).
+        DescriptorRange rotRegsSRV;
+        /// @brief CPU-side VDP2 rotation registers.
+        std::array<VDP2RotRegs, 2> cpuRotRegs{};
+
         /// @brief VDP2 rotation parameter base values buffer.
         D3D12Resource rotParamBasesBuffer;
         /// @brief VDP2 rotation parameter base values buffer SRV (offline).
         DescriptorRange rotParamBasesSRV;
         /// @brief CPU-side VDP2 rotation parameter base values.
         std::array<VDP2RotParamBase, kMaxNormalResV * 2> cpuRotParamBases{};
+
+        /// @brief VDP2 rotation parameter states buffer.
+        D3D12Resource rotParamStatesBuffer;
+        /// @brief VDP2 rotation parameter states buffer SRV (offline).
+        DescriptorRange rotParamStatesSRV;
+        /// @brief VDP2 rotation parameter states buffer UAV (offline).
+        DescriptorRange rotParamStatesUAV;
 
         /// @brief 2D texture for the composited VDP2 output.
         D3D12Resource compositeOutTexture;
@@ -1222,6 +1322,15 @@ struct Direct3D12VDPRenderer::Impl {
         DescriptorRange composeParamsSRV;
         /// @brief CPU-side layer composition parameters.
         VDP2ComposeParams cpuComposeParams{};
+
+        /// @brief Compute shader for calculating rotation parameters.
+        gpu::ComputeShader calcRotParamsShader;
+        /// @brief Root signature for calculating rotation parameters.
+        D3D12RootSignature calcRotParamsRootSig;
+        /// @brief Pipeline state object for calculating rotation parameters.
+        D3D12PipelineState calcRotParamsPSO;
+        /// @brief Descriptor range for calculating rotation parameters.
+        DescriptorRange calcRotParamsDescs;
 
         /// @brief Compute shader for drawing background layers.
         gpu::ComputeShader drawBGsShader;
@@ -1499,6 +1608,58 @@ struct Direct3D12VDPRenderer::Impl {
                                               vdp2.layerOutUAV.cpuHandle);
         }
 
+        // RBG0-1 line color outputs 2D texture array
+        {
+            static constexpr UINT16 kNumLayers = 2;
+            static constexpr DXGI_FORMAT kFormat = DXGI_FORMAT_R8G8B8A8_UINT;
+
+            auto builder = vdp2.rbgLineColorOutTexture.Texture2DBuilder(kMaxNormalResH, kMaxNormalResV, kNumLayers);
+            builder.Format(kFormat);
+            builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create RBG line color outputs texture array, error code {:X}", (uint32)hr)};
+            }
+            vdp2.rbgLineColorOutTexture->SetName(L"[Ymir-VDP2] RBG line color outputs texture array");
+
+            if (!offlineHeapAlloc.Allocate(vdp2.rbgLineColorOutSRV)) {
+                return util::ErrorMessage{"Could not allocate RBG line color outputs texture array SRV"};
+            }
+            const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                .Format = kFormat,
+                .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Texture2DArray =
+                    {
+                        .MostDetailedMip = 0,
+                        .MipLevels = 1,
+                        .FirstArraySlice = 0,
+                        .ArraySize = kNumLayers,
+                        .PlaneSlice = 0,
+                        .ResourceMinLODClamp = 0.0f,
+                    },
+            };
+            device->CreateShaderResourceView(vdp2.rbgLineColorOutTexture.GetPointer(), &srvDesc,
+                                             vdp2.rbgLineColorOutSRV.cpuHandle);
+
+            if (!offlineHeapAlloc.Allocate(vdp2.rbgLineColorOutUAV)) {
+                return util::ErrorMessage{"Could not allocate layer outputs texture array UAV"};
+            }
+            const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+                .Format = kFormat,
+                .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY,
+                .Texture2DArray =
+                    {
+                        .MipSlice = 0,
+                        .FirstArraySlice = 0,
+                        .ArraySize = kNumLayers,
+                        .PlaneSlice = 0,
+                    },
+            };
+            device->CreateUnorderedAccessView(vdp2.rbgLineColorOutTexture.GetPointer(), nullptr, &uavDesc,
+                                              vdp2.rbgLineColorOutUAV.cpuHandle);
+        }
+
         // LNCL/BACK screen texture
         {
             static constexpr DXGI_FORMAT kFormat = DXGI_FORMAT_R8G8B8A8_UINT;
@@ -1543,7 +1704,7 @@ struct Direct3D12VDPRenderer::Impl {
             vdp2.compositeOutTexture->SetName(L"[Ymir-VDP2] Composited output texture");
 
             if (!offlineHeapAlloc.Allocate(vdp2.compositeOutUAV)) {
-                return util::ErrorMessage{"Could not composited output texture UAV"};
+                return util::ErrorMessage{"Could not create composited output texture UAV"};
             }
             const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
                 .Format = kFormat,
@@ -1556,6 +1717,33 @@ struct Direct3D12VDPRenderer::Impl {
             };
             device->CreateUnorderedAccessView(vdp2.compositeOutTexture.GetPointer(), nullptr, &uavDesc,
                                               vdp2.compositeOutUAV.cpuHandle);
+        }
+
+        // VDP2 rotation registers buffer
+        {
+            auto builder = vdp2.rotRegsBuffer.BufferBuilder(sizeof(vdp2.cpuRotRegs));
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create VDP2 rotation registers buffer, error code {:X}", (uint32)hr)};
+            }
+            vdp2.rotRegsBuffer->SetName(L"[Ymir-VDP2] Rotation registers buffer");
+
+            if (!offlineHeapAlloc.Allocate(vdp2.rotRegsSRV)) {
+                return util::ErrorMessage{"Could not allocate VDP2 rotation registers buffer SRV"};
+            }
+            const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Buffer =
+                    {
+                        .FirstElement = 0,
+                        .NumElements = 2,
+                        .StructureByteStride = sizeof(VDP2RotRegs),
+                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                    },
+            };
+            device->CreateShaderResourceView(vdp2.rotRegsBuffer.GetPointer(), &srvDesc, vdp2.rotRegsSRV.cpuHandle);
         }
 
         // VDP2 rotation parameter base values buffer
@@ -1584,6 +1772,54 @@ struct Direct3D12VDPRenderer::Impl {
             };
             device->CreateShaderResourceView(vdp2.rotParamBasesBuffer.GetPointer(), &srvDesc,
                                              vdp2.rotParamBasesSRV.cpuHandle);
+        }
+
+        // VDP2 rotation parameter states buffer
+        {
+            static constexpr size_t kRotParamsSize = vdp::kMaxNormalResH * vdp::kMaxNormalResV;
+            auto builder = vdp2.rotParamStatesBuffer.BufferBuilder(kRotParamsSize * 2);
+            builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create VDP2 rotation parameter states buffer, error code {:X}", (uint32)hr)};
+            }
+            vdp2.rotParamStatesBuffer->SetName(L"[Ymir-VDP2] Rotation parameter states buffer");
+
+            if (!offlineHeapAlloc.Allocate(vdp2.rotParamStatesSRV)) {
+                return util::ErrorMessage{"Could not allocate VDP2 rotation parameter states buffer SRV"};
+            }
+            const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Buffer =
+                    {
+                        .FirstElement = 0,
+                        .NumElements = 2,
+                        .StructureByteStride = kRotParamsSize,
+                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                    },
+            };
+            device->CreateShaderResourceView(vdp2.rotParamStatesBuffer.GetPointer(), &srvDesc,
+                                             vdp2.rotParamStatesSRV.cpuHandle);
+
+            if (!offlineHeapAlloc.Allocate(vdp2.rotParamStatesUAV)) {
+                return util::ErrorMessage{"Could not VDP2 rotation parameter states buffer UAV"};
+            }
+            const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                .Buffer =
+                    {
+                        .FirstElement = 0,
+                        .NumElements = 2,
+                        .StructureByteStride = kRotParamsSize,
+                        .CounterOffsetInBytes = 0,
+                        .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
+                    },
+            };
+            device->CreateUnorderedAccessView(vdp2.rotParamStatesBuffer.GetPointer(), nullptr, &uavDesc,
+                                              vdp2.rotParamStatesUAV.cpuHandle);
         }
 
         // VDP2 layer rendering parameters buffer
@@ -1661,8 +1897,8 @@ struct Direct3D12VDPRenderer::Impl {
             auto rootSigBuilder = vdp2.drawBGsRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(3, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
-                .AddUAVs(1, 0);
+                .AddSRVs(5, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(2, 0);
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{
                     fmt::format("Could not build VDP2 layer rendering root signature, error code {:X}", (uint32)hr)};
@@ -1680,12 +1916,11 @@ struct Direct3D12VDPRenderer::Impl {
             vdp2.drawBGsPSO->SetName(L"[Ymir-VDP2] Layer rendering pipeline state object");
 
             const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                vdp2.vramSRV.cpuHandle,
-                vdp2.cramColorSRV.cpuHandle,
-                vdp2.layerRenderParamsSRV.cpuHandle,
-                vdp2.layerOutUAV.cpuHandle,
+                vdp2.layerRenderParamsSRV.cpuHandle, vdp2.rotRegsSRV.cpuHandle,        vdp2.vramSRV.cpuHandle,
+                vdp2.cramColorSRV.cpuHandle,         vdp2.rotParamStatesSRV.cpuHandle, vdp2.layerOutUAV.cpuHandle,
+                vdp2.rbgLineColorOutUAV.cpuHandle,
             };
-            const UINT srcSizes[] = {1, 1, 1, 1};
+            const UINT srcSizes[] = {1, 1, 1, 1, 1, 1, 1};
 
             if (!resourceHeapAlloc.Allocate(vdp2.drawBGsDescs, std::size(srcHandles))) {
                 return util::ErrorMessage{"Could not allocate VDP2 layer rendering descriptors"};
@@ -2086,7 +2321,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         params.displayParams.displayEnable = regs2.TVMD.DISP;
         params.displayParams.borderColorMode = regs2.TVMD.BDCLMD;
-        params.displayParams.interlaceMode = static_cast<uint32>(regs2.TVMD.LSMDn);
+        params.displayParams.interlaceMode = static_cast<HLSLuint>(regs2.TVMD.LSMDn);
         params.displayParams.oddField = regs2.TVSTAT.ODD;
         params.displayParams.exclusiveMonitor = exclusiveMonitor;
         params.displayParams.colorRAMMode = regs2.vramControl.colorRAMMode;
@@ -2103,6 +2338,7 @@ struct Direct3D12VDPRenderer::Impl {
         params.layerParams.lineColorEnableRBG1 = regs2.bgParams[1].lineColorScreenEnable;
         params.layerParams.mosaicH = regs2.mosaicH - 1;
         params.layerParams.mosaicV = regs2.mosaicV - 1;
+        params.layerParams.rotParamMode = static_cast<HLSLuint>(regs2.commonRotParams.rotParamMode);
 
         params.spriteParams.rotate = regs1.fbRotEnable;
         params.spriteParams.pixel8Bits = regs1.pixel8Bits;
@@ -2120,7 +2356,7 @@ struct Direct3D12VDPRenderer::Impl {
         params.spriteParams.mixedFormat = regs2.spriteParams.mixedFormat;
         params.spriteParams.colorCalcEnable = regs2.spriteParams.colorCalcEnable;
         params.spriteParams.colorCalcValue = regs2.spriteParams.colorCalcValue;
-        params.spriteParams.colorCalcCond = static_cast<uint32>(regs2.spriteParams.colorCalcCond);
+        params.spriteParams.colorCalcCond = static_cast<HLSLuint>(regs2.spriteParams.colorCalcCond);
         params.spriteParams.colorDataOffset = regs2.spriteParams.colorDataOffset >> 8u;
         params.spriteParams.useSpriteWindow = regs2.spriteParams.useSpriteWindow;
         params.spriteParams.windowEnabled = regs2.spriteParams.spriteWindowEnabled;
@@ -2156,7 +2392,6 @@ struct Direct3D12VDPRenderer::Impl {
 
         params.enhancements.deinterlace = enhancements.deinterlace;
         params.enhancements.transparentMeshes = enhancements.transparentMeshes;
-        // TODO: other fields
 
         // NOTE: this is uploaded as 32-bit root constants, not through the upload buffer
     }
@@ -2245,13 +2480,6 @@ struct Direct3D12VDPRenderer::Impl {
 
             const bool bitmap = bgParams.bitmap;
 
-            // TODO: use these in the rotparams renderer:
-            // rotParams.coeffDataMode;
-            // rotParams.coeffDataSize;
-            // rotParams.coeffTableAddressOffset;
-            // rotParams.coeffTableEnable;
-            // rotParams.coeffUseLineColorData;
-
             RBGParams &renderParams = vdp2.cpuLayerRenderParams.rbg[i];
             renderParams.base.enabled = regs2.bgEnabled[i + 4];
             renderParams.base.enableTransparency = bgParams.enableTransparency;
@@ -2303,6 +2531,21 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.lineWindowTableEnable = windowParams.lineWindowTableEnable;
         }
 
+        VDP2LayerWindowParams &rotWindows = vdp2.cpuLayerRenderParams.rotWindows;
+        rotWindows.windowLogicAnd = regs2.commonRotParams.windowSet.logic == WindowLogic::And;
+        rotWindows.window0Enable = regs2.commonRotParams.windowSet.enabled[0];
+        rotWindows.window0Invert = regs2.commonRotParams.windowSet.inverted[0];
+        rotWindows.window1Enable = regs2.commonRotParams.windowSet.enabled[1];
+        rotWindows.window1Invert = regs2.commonRotParams.windowSet.inverted[1];
+
+        VDP2LineBackScreenParams &lnclParams = vdp2.cpuLayerRenderParams.lineScreenParams;
+        lnclParams.baseAddress = regs2.lineScreenParams.baseAddress;
+        lnclParams.perLine = regs2.lineScreenParams.perLine;
+
+        VDP2LineBackScreenParams &backParams = vdp2.cpuLayerRenderParams.backScreenParams;
+        backParams.baseAddress = regs2.backScreenParams.baseAddress;
+        backParams.perLine = regs2.backScreenParams.perLine;
+
         // Special function codes
         vdp2.cpuLayerRenderParams.specialFunctionCodes =
             PackBools<uint32>(regs2.specialFunctionCodes[0].colorMatches) |
@@ -2329,6 +2572,67 @@ struct Direct3D12VDPRenderer::Impl {
             memcpy(alloc.data, &vdp2.cpuLayerRenderParams, size);
 
             ID3D12Resource *dstResource = vdp2.layerRenderParamsBuffer.GetPointer();
+            vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+            barrier.Reverse().Emit(vdp2.cmdList);
+        }
+
+        return {};
+    }
+
+    util::VoidResult<> VDP2UpdateRotRegs() {
+        if (!vdp2.rotRegsDirty) {
+            return {};
+        }
+        vdp2.rotRegsDirty = false;
+
+        VDP2Regs &regs2 = vdpState.regs2;
+        if (!regs2.bgEnabled[4] && !regs2.bgEnabled[5]) {
+            // Skip if no RBGs are enabled
+            return {};
+        }
+
+        for (uint32 i = 0; i < 2; ++i) {
+            VDP2RotRegs &dst = vdp2.cpuRotRegs[i];
+            RotationParams &src = regs2.rotParams[i];
+            const auto &vramCtl = regs2.vramControl;
+
+            auto isCoeff = [](RotDataBankSel sel) { return sel == RotDataBankSel::Coefficients; };
+
+            dst.coeffTableEnable = src.coeffTableEnable;
+            dst.coeffUseLineColorData = src.coeffUseLineColorData;
+            dst.coeffTableCRAM = vramCtl.colorRAMCoeffTableEnable;
+            dst.coeffDataSize = src.coeffDataSize;
+            dst.coeffDataMode = static_cast<HLSLuint>(src.coeffDataMode);
+            dst.coeffDataAccessA0 = isCoeff(vramCtl.rotDataBankSelA0);
+            dst.coeffDataAccessA1 =
+                isCoeff(vramCtl.partitionVRAMA ? vramCtl.rotDataBankSelA1 : vramCtl.rotDataBankSelA0);
+            dst.coeffDataAccessB0 = isCoeff(vramCtl.rotDataBankSelB0);
+            dst.coeffDataAccessB1 =
+                isCoeff(vramCtl.partitionVRAMB ? vramCtl.rotDataBankSelB1 : vramCtl.rotDataBankSelB0);
+            dst.coeffDataPerDot = vramCtl.perDotRotationCoeffs;
+        }
+
+        // Update buffer
+        {
+            ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
+            UploadAllocation alloc{};
+
+            BufferTransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.Add(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
+                        D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                        D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
+            const size_t size = sizeof(vdp2.cpuRotRegs);
+            if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
+                return util::ErrorMessage{fmt::format(
+                    "Failed to allocate upload buffer for VDP2 rotation registers: {}", result.Error().message)};
+            }
+            memcpy(alloc.data, &vdp2.cpuRotRegs, size);
+
+            ID3D12Resource *dstResource = vdp2.rotRegsBuffer.GetPointer();
             vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
 
             barrier.Reverse().Emit(vdp2.cmdList);
@@ -2527,7 +2831,7 @@ struct Direct3D12VDPRenderer::Impl {
         }
         VDP2UpdateCommonRenderParams();
         VDP2UpdateLayerRenderParams();
-        // TODO: VDP2UpdateRotRegs();
+        VDP2UpdateRotRegs();
         VDP2UpdateComposeParams();
     }
 
@@ -2575,8 +2879,6 @@ struct Direct3D12VDPRenderer::Impl {
         // Determine how many lines to draw and update next scanline counter
         const uint32 baseNumLines = y - startY + 1;
         const uint32 numLines = baseNumLines << yShift;
-        const uint32 baseNumScaledLines = y - startY + 1; // ScaleUpCeil(y) - ScaleUp(startY) + 1;
-        const uint32 numScaledLines = baseNumScaledLines << yShift;
         vdp2.nextLayerRenderLine = y + 1;
 
         // Compute rotation parameters if any RBGs are enabled
@@ -2601,7 +2903,7 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.cpuCommonRenderParams.startY = startY << yShift;
 
         // TODO: Draw sprite layer
-        // cmdList->Dispatch((ScaleUpCeil(HRes) + 31) / 32, numScaledLines, enhancements.transparentMeshes ? 2 : 1);
+        // cmdList->Dispatch((HRes + 31) / 32, numLines, enhancements.transparentMeshes ? 2 : 1);
 
         // TODO: Draw color calculation window
         // cmdList->Dispatch(HRes / 32, numLines, 1);
@@ -2612,18 +2914,10 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
                                               &vdp2.cpuCommonRenderParams, 0);
         cmdList->SetComputeRootDescriptorTable(1, vdp2.drawBGsDescs.gpuHandle);
-        // cmdList->Dispatch((ScaleUpCeil(HRes) + 31) / 32, numScaledLines, 1);
-        cmdList->Dispatch(HRes / 32, numScaledLines, 1);
+        cmdList->Dispatch(HRes / 32, numLines, 1);
     }
 
     void VDP2ComposeLines(uint32 y) {
-        // TODO: implement
-        // - if compositing state is dirty:
-        //   - set compositing parameters
-        //   - compose lines from composeSegmentStartY to y-1 (if possible)
-        //   - set composeSegmentStartY = y
-        //   - clear dirty state
-
         // Bail out if there's nothing to render
         if (y < vdp2.nextComposeLine) {
             return;
@@ -2652,7 +2946,6 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
                                               &vdp2.cpuCommonRenderParams, 0);
         cmdList->SetComputeRootDescriptorTable(1, vdp2.composeDescs.gpuHandle);
-        // cmdList->Dispatch((ScaleUpCeil(HRes) + 31) / 32, ScaleUpCeil(numLines), 1);
         cmdList->Dispatch((HRes + 31) / 32, numLines, 1);
     }
 

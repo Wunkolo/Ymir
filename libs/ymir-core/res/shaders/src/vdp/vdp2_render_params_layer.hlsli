@@ -57,11 +57,20 @@ struct RBGParams {
     uint pageBaseAddresses[2][16];
 };
 
+struct LineBackScreenParams {
+    uint baseAddress;
+    bool perLine;
+};
+
 struct LayerRenderParams {
     NBGParams nbg[4];
     RBGParams rbg[2];
 
     GlobalWindowParams windows[2];
+    LayerWindowParams rotWindows;
+
+    LineBackScreenParams lineScreenParams;
+    LineBackScreenParams backScreenParams;
 
     uint specialFunctionCodes;
 };
