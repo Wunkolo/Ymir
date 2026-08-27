@@ -423,10 +423,8 @@ foreach (SHADER_SRC ${COMPUTE_SHADER_SOURCES})
     list(APPEND COMPILED_SHADERS ${SHADER_BINARY_FILES})
 endforeach ()
 
-# Configure properties for shader source files in Visual Studio
+# Configure properties for shader source files in Visual Studio solutions
 if (WIN32)
-    message(STATUS "Configuring shader source properties for Visual Studio")
-    message(STATUS "Shaders: ${COMPUTE_SHADER_SOURCES}")
     set_source_files_properties(
         ${COMPUTE_SHADER_SOURCES}
         PROPERTIES
