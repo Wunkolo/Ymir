@@ -79,7 +79,7 @@ jobs:
               fi
 
               # If the job is queued, we're probably good
-              if [ "$STAGE" = "queued" ]; then
+              if [ "$STATE" = "queued" ]; then
                 echo "[+] Job is queued"
                 exit 0
               fi
