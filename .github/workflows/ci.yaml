@@ -148,6 +148,13 @@ jobs:
           vulkan_version: "1.4.357.0"
           cache: true
 
+      - name: Build DXC for Vulkan SDK (AArch64)
+        if: matrix.arch.name == 'a64'
+        shell: bash
+        run: |
+          cd $VULKAN_SDK/..
+          ./vulkansdk --skip-deps --maxjobs dxc
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: recursive
