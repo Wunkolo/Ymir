@@ -15,6 +15,7 @@ env:
   VCPKG_EXE: ${{ github.workspace }}/vcpkg/vcpkg
   FEED_URL: https://nuget.pkg.github.com/StrikerX3/index.json
   VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/StrikerX3/index.json,readwrite"
+  VULKAN_SDK_VERSION: "1.4.357.0"
 
 jobs:
   build-windows:
@@ -47,7 +48,7 @@ jobs:
       - name: Set up Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa
         with:
-          vulkan_version: "1.4.357.0"
+          vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
           cache: true
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -147,16 +148,16 @@ jobs:
         id: cache-dxc
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ${{ steps.vulkan-sdk.outputs.VULKAN_SDK }}/..
-          key: dxc-aarch64-${{ runner.os }}-${{ steps.vulkan-sdk.outputs.VULKAN_VERSION }}
+          path: ${{ env.HOME }}/vulkan-sdk/${{ env.VULKAN_SDK_VERSION }}
+          key: dxc-aarch64-${{ runner.os }}-${{ env.VULKAN_SDK_VERSION }}
 
       - name: Set up Vulkan SDK
         id: vulkan-sdk
         if: steps.cache-dxc.outputs.cache-hit != 'true'
         uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa
         with:
-          vulkan_version: "1.4.357.0"
-          cache: ${{ matrix.arch.name != 'a64' }}
+          vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
+          cache: true
 
       - name: Build DXC for Vulkan SDK (AArch64)
         if: matrix.arch.name == 'a64' && steps.cache-dxc.outputs.cache-hit != 'true'
@@ -345,7 +346,7 @@ jobs:
       - name: Set up Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa
         with:
-          vulkan_version: "1.4.357.0"
+          vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
           cache: true
           stripdown: true
 
