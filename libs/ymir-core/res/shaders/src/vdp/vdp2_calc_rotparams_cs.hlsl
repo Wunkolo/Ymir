@@ -15,7 +15,7 @@ StructuredBuffer<RotParamBase> rotParamBases : register(t2);
 ByteAddressBuffer vram : register(t3);
 ByteAddressBuffer cramCoeff : register(t4);
 
-RWStructuredBuffer<RotParamState> rotParamStatesOut : register(u0);
+RWStructuredBuffer<RotParamState> rotParamStatesOut : register(u1);
 
 
 // ---------------------------------------------------------------------------------------------------------------------

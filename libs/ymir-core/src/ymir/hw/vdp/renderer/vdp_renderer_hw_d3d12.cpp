@@ -16,8 +16,6 @@
 #include <ymir/util/dev_log.hpp>
 #include <ymir/util/dirty_bitmap.hpp>
 
-#include <ymir/version.hpp> // TODO: remove once Ymir_LOCAL_BUILD blocks are removed
-
 #include <d3d12.h>
 
 #include <fmt/format.h>
@@ -1896,8 +1894,8 @@ struct Direct3D12VDPRenderer::Impl {
             auto rootSigBuilder = vdp2.calcRotParamsRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(4, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
-                .AddUAVs(1, 0);
+                .AddSRVs(4, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(1, 1); // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{
                     fmt::format("Could not build VDP2 rotation parameters calculation root signature, error code {:X}",
@@ -2043,11 +2041,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // TODO: upload full VDP1 and VDP2 states
 
-#ifdef Ymir_LOCAL_BUILD // Allow initialization to succeed so we can develop this stuff
         return {};
-#else
-        return util::ErrorMessage{"Unimplemented"};
-#endif
     }
 
     void Shutdown() {
