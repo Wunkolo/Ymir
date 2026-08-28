@@ -11,7 +11,11 @@ cbuffer CommonRenderParams : register(b0) {
 }
 
 StructuredBuffer<ComposeParams> composeParams : register(t1);
-Texture2DArray<uint4> bgIn : register(t2);
+Texture2DArray<uint4> layerIn : register(t2);
+StructuredBuffer<uint4> lineColorIn : register(t3);
+Texture2DArray<uint4> rbgLineColorIn : register(t4);
+// Texture2D<uint> spriteAttrsIn : register(t5);
+// Texture2D<uint4> colorCalcWindowIn : register(t6);
 
 RWTexture2D<float4> textureOut : register(u0);
 
@@ -40,7 +44,7 @@ uint GetOutputY(uint y) {
 // Compositor
 
 uint3 Compose(uint2 basePos) {
-    return bgIn[uint3(basePos.xy, 0)].rgb;
+    return layerIn[uint3(basePos.xy, 0)].rgb;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

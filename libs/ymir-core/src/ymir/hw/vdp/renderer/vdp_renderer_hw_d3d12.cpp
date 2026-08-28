@@ -1264,13 +1264,12 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief RBG0-1 line color outputs UAV (offline).
         DescriptorRange rbgLineColorOutUAV;
 
-        /// @brief LNCL/BACK screen texture.
-        /// 2D texture with X=0->LNCL, X=1->BACK, and Y being each scanline.
-        D3D12Resource lnclBackTexture;
-        /// @brief LNCL/BACK screen texture SRV (offline).
+        /// @brief LNCL/BACK screen buffer.
+        D3D12Resource lnclBackBuffer;
+        /// @brief LNCL/BACK screen buffer SRV (offline).
         DescriptorRange lnclBackSRV;
-        /// @brief CPU-side LNCL/BACK screen texture (0,y=LNCL; 1,y=BACK).
-        std::array<std::array<ColorR8G8B8A8, 2>, kMaxResV> cpuLnclBack{};
+        /// @brief CPU-side LNCL/BACK screen buffer (0=LNCL; 1=BACK).
+        std::array<std::array<ColorR8G8B8A8, kMaxResV>, 2> cpuLnclBack{};
 
         /// @brief VDP2 rotation registers buffer.
         D3D12Resource rotRegsBuffer;
@@ -1654,34 +1653,33 @@ struct Direct3D12VDPRenderer::Impl {
                                               vdp2.rbgLineColorOutUAV.cpuHandle);
         }
 
-        // LNCL/BACK screen texture
+        // LNCL/BACK screen buffer
         {
-            static constexpr DXGI_FORMAT kFormat = DXGI_FORMAT_R8G8B8A8_UINT;
-
-            auto builder = vdp2.lnclBackTexture.Texture2DBuilder(2, kMaxNormalResV);
-            builder.Format(kFormat);
+            static constexpr size_t kNumEntries = 2 * kMaxResV;
+            static constexpr size_t kEntrySize = sizeof(ColorR8G8B8A8);
+            auto builder = vdp2.lnclBackBuffer.BufferBuilder(sizeof(vdp2.cpuLnclBack));
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
-                    fmt::format("Could not create LNCL/BACK screen texture, error code {:X}", (uint32)hr)};
+                    fmt::format("Could not create LNCL/BACK screen buffer, error code {:X}", (uint32)hr)};
             }
-            vdp2.lnclBackTexture->SetName(L"[Ymir-VDP2] LNCL/BACK screen texture");
+            vdp2.lnclBackBuffer->SetName(L"[Ymir-VDP2] LNCL/BACK screen buffer");
 
             if (!offlineHeapAlloc.Allocate(vdp2.lnclBackSRV)) {
-                return util::ErrorMessage{"Could not allocate LNCL/BACK screen texture SRV"};
+                return util::ErrorMessage{"Could not allocate LNCL/BACK screen buffer SRV"};
             }
             const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-                .Format = kFormat,
-                .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
                 .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                .Texture2D =
+                .Buffer =
                     {
-                        .MostDetailedMip = 0,
-                        .MipLevels = 1,
-                        .PlaneSlice = 0,
-                        .ResourceMinLODClamp = 0.0f,
+                        .FirstElement = 0,
+                        .NumElements = kNumEntries,
+                        .StructureByteStride = kEntrySize,
+                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
                     },
             };
-            device->CreateShaderResourceView(vdp2.lnclBackTexture.GetPointer(), &srvDesc, vdp2.lnclBackSRV.cpuHandle);
+            device->CreateShaderResourceView(vdp2.lnclBackBuffer.GetPointer(), &srvDesc, vdp2.lnclBackSRV.cpuHandle);
         }
 
         // Composited VDP2 output texture
@@ -1873,7 +1871,7 @@ struct Direct3D12VDPRenderer::Impl {
                                              vdp2.composeParamsSRV.cpuHandle);
         }
 
-        // Build compute shader, root signature, pipeline state object and descriptors for calculating rotparams
+        // Build shader, PSO and related resources for calculating rotparams
         {
             auto shaderBlobResult = LoadShader("src/vdp/vdp2_calc_rotparams_cs.cso");
             if (!shaderBlobResult) {
@@ -1918,17 +1916,18 @@ struct Direct3D12VDPRenderer::Impl {
                 vdp2.rotRegsSRV.cpuHandle,      vdp2.rotParamBasesSRV.cpuHandle,  vdp2.vramSRV.cpuHandle,
                 vdp2.cramRotCoeffSRV.cpuHandle, vdp2.rotParamStatesUAV.cpuHandle,
             };
-            const UINT srcSizes[] = {1, 1, 1, 1, 1, 1, 1};
+            std::array<UINT, std::size(srcHandles)> srcSizes{};
+            srcSizes.fill(1);
 
             if (!resourceHeapAlloc.Allocate(vdp2.calcRotParamsDescs, std::size(srcHandles))) {
                 return util::ErrorMessage{"Could not allocate VDP2 rotation parameters calculation descriptors"};
             }
 
             device->CopyDescriptors(1, &vdp2.calcRotParamsDescs.cpuHandle, &vdp2.calcRotParamsDescs.count,
-                                    std::size(srcHandles), srcHandles, srcSizes, resourceHeap.GetHeapType());
+                                    std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
         }
 
-        // Build compute shader, root signature, pipeline state object and descriptors for drawing layers
+        // Build shader, PSO and related resources for drawing layers
         {
             auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_bgs_cs.cso");
             if (!shaderBlobResult) {
@@ -1970,17 +1969,18 @@ struct Direct3D12VDPRenderer::Impl {
                 vdp2.cramColorSRV.cpuHandle,         vdp2.rotParamStatesSRV.cpuHandle, vdp2.layerOutUAV.cpuHandle,
                 vdp2.rbgLineColorOutUAV.cpuHandle,
             };
-            const UINT srcSizes[] = {1, 1, 1, 1, 1, 1, 1};
+            std::array<UINT, std::size(srcHandles)> srcSizes{};
+            srcSizes.fill(1);
 
             if (!resourceHeapAlloc.Allocate(vdp2.drawBGsDescs, std::size(srcHandles))) {
                 return util::ErrorMessage{"Could not allocate VDP2 layer rendering descriptors"};
             }
 
             device->CopyDescriptors(1, &vdp2.drawBGsDescs.cpuHandle, &vdp2.drawBGsDescs.count, std::size(srcHandles),
-                                    srcHandles, srcSizes, resourceHeap.GetHeapType());
+                                    srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
         }
 
-        // Build compute shader, root signature, pipeline state object and descriptors for compositing layers
+        // Build shader, PSO and related resources for compositing layers
         {
             auto shaderBlobResult = LoadShader("src/vdp/vdp2_compose_cs.cso");
             if (!shaderBlobResult) {
@@ -1999,7 +1999,7 @@ struct Direct3D12VDPRenderer::Impl {
             auto rootSigBuilder = vdp2.composeRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(2, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddSRVs(4, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
                 .AddUAVs(1, 0);
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -2018,18 +2018,18 @@ struct Direct3D12VDPRenderer::Impl {
             vdp2.composePSO->SetName(L"[Ymir-VDP2] Layer compositing pipeline state object");
 
             const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                vdp2.composeParamsSRV.cpuHandle,
-                vdp2.layerOutSRV.cpuHandle,
-                vdp2.compositeOutUAV.cpuHandle,
+                vdp2.composeParamsSRV.cpuHandle,   vdp2.layerOutSRV.cpuHandle,     vdp2.lnclBackSRV.cpuHandle,
+                vdp2.rbgLineColorOutSRV.cpuHandle, vdp2.compositeOutUAV.cpuHandle,
             };
-            const UINT srcSizes[] = {1, 1, 1};
+            std::array<UINT, std::size(srcHandles)> srcSizes{};
+            srcSizes.fill(1);
 
             if (!resourceHeapAlloc.Allocate(vdp2.composeDescs, std::size(srcHandles))) {
                 return util::ErrorMessage{"Could not allocate VDP2 layer compositing descriptors"};
             }
 
             device->CopyDescriptors(1, &vdp2.composeDescs.cpuHandle, &vdp2.composeDescs.count, std::size(srcHandles),
-                                    srcHandles, srcSizes, resourceHeap.GetHeapType());
+                                    srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
         }
 
         Reset();
@@ -2811,7 +2811,7 @@ struct Direct3D12VDPRenderer::Impl {
             const uint32 lnclY = lineParams.perLine ? y : 0;
             const uint32 address = lineParams.baseAddress + lnclY * sizeof(uint16);
             const uint32 cramAddress = vdpState.mem2.ReadVRAM<uint16>(address);
-            vdp2.cpuLnclBack[y][0] = vdp2.cpuCRAMColorCache[cramAddress & 0x7FF];
+            vdp2.cpuLnclBack[0][y] = vdp2.cpuCRAMColorCache[cramAddress & 0x7FF];
         }
 
         // Read back screen color
@@ -2821,11 +2821,37 @@ struct Direct3D12VDPRenderer::Impl {
             const uint32 address = backParams.baseAddress + backY * sizeof(Color555);
             const Color555 color5{.u16 = vdpState.mem2.ReadVRAM<uint16>(address)};
             const Color888 color8 = ConvertRGB555to888(color5);
-            vdp2.cpuLnclBack[y][1].r = color8.r;
-            vdp2.cpuLnclBack[y][1].g = color8.g;
-            vdp2.cpuLnclBack[y][1].b = color8.b;
-            vdp2.cpuLnclBack[y][1].a = color8.msb;
+            vdp2.cpuLnclBack[1][y].r = color8.r;
+            vdp2.cpuLnclBack[1][y].g = color8.g;
+            vdp2.cpuLnclBack[1][y].b = color8.b;
+            vdp2.cpuLnclBack[1][y].a = color8.msb;
         }
+    }
+
+    util::VoidResult<> VDP2UploadLineColorBackScreens() {
+        ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
+        UploadAllocation alloc{};
+
+        BufferTransitionBarrierSet barrier{features.enhancedBarriers};
+        barrier.Add(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                    D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        barrier.Emit(vdp2.cmdList);
+
+        const size_t size = sizeof(vdp2.cpuLnclBack);
+        if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
+            return util::ErrorMessage{
+                fmt::format("Failed to allocate upload buffer for VDP2 LNCL/BACK screens: {}", result.Error().message)};
+        }
+        memcpy(alloc.data, &vdp2.cpuLnclBack, size);
+
+        ID3D12Resource *dstResource = vdp2.lnclBackBuffer.GetPointer();
+        vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+        barrier.Reverse().Emit(vdp2.cmdList);
+
+        return {};
     }
 
     void VDP2UpdateRotationParameterBases(uint16 y) {
@@ -3011,13 +3037,17 @@ struct Direct3D12VDPRenderer::Impl {
         auto &cmdList = vdp2.cmdList;
 
         vdp2.cpuCommonRenderParams.startY = vdp2.nextComposeLine;
-        // TODO: VDP2UploadLineColorBackTexture();
+        VDP2UploadLineColorBackScreens();
 
         // Transition all compositing resources to compute shading usage
         BufferTransitionBarrierSet barriers{features.enhancedBarriers};
         barriers.Add(vdp2.composeParamsBuffer.GetPointer(), sizeof(vdp2.cpuComposeParams), //
                      D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_COMPUTE_SHADING,          //
                      D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON,          //
+                     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        barriers.Add(vdp2.lnclBackBuffer.GetPointer(), sizeof(vdp2.cpuLnclBack),  //
+                     D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_COMPUTE_SHADING, //
+                     D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON, //
                      D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         barriers.Emit(cmdList);
 
