@@ -48,10 +48,10 @@ permissions:
   contents: read
 
 env:
-  USERNAME: StrikerX3
+  USERNAME: ymir-emu
   VCPKG_EXE: ${{ github.workspace }}/vcpkg/vcpkg
-  FEED_URL: https://nuget.pkg.github.com/StrikerX3/index.json
-  VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/StrikerX3/index.json,readwrite"
+  FEED_URL: https://nuget.pkg.github.com/ymir-emu/index.json
+  VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/ymir-emu/index.json,readwrite"
   VULKAN_SDK_VERSION: "1.4.357.0"
 
 jobs:
@@ -308,7 +308,7 @@ jobs:
         if: matrix.architecture.name == 'AArch64-NEON'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ${{ env.HOME }}/vulkan-sdk/${{ env.VULKAN_SDK_VERSION }}
+          path: ~/vulkan-sdk/${{ env.VULKAN_SDK_VERSION }}
           key: dxc-aarch64-${{ runner.os }}-${{ env.VULKAN_SDK_VERSION }}
 
       - name: Set up Vulkan SDK
@@ -500,8 +500,8 @@ jobs:
         shell: bash
         env:
           VCPKG_EXE: ${{ github.workspace }}/vcpkg/vcpkg
-          USERNAME: StrikerX3
-          FEED_URL: https://nuget.pkg.github.com/StrikerX3/index.json
+          USERNAME: ymir-emu
+          FEED_URL: https://nuget.pkg.github.com/ymir-emu/index.json
         run: |
           nuget sources add \
             -Source "${{ env.FEED_URL }}" \
