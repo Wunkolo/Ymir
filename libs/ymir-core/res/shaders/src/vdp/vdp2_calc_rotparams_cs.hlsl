@@ -15,7 +15,7 @@ StructuredBuffer<RotParamBase> rotParamBases : register(t2);
 ByteAddressBuffer vram : register(t3);
 ByteAddressBuffer cramCoeff : register(t4);
 
-RWStructuredBuffer<RotParamState> rotParamsOut : register(u0);
+RWStructuredBuffer<RotParamState> rotParamStatesOut : register(u0);
 
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -289,5 +289,5 @@ RotParamState CalcRotation(uint2 pos, uint index) {
 [numthreads(32, 1, 2)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint outIndex = id.x + (id.y + g_commonParams.startY) * kRotParamLinePitch + id.z * kRotParamEntryStride;
-    rotParamsOut[outIndex] = CalcRotation(id.xy, id.z);
+    rotParamStatesOut[outIndex] = CalcRotation(id.xy, id.z);
 }

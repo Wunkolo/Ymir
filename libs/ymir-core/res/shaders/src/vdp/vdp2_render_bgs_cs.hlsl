@@ -737,7 +737,7 @@ void StoreRotationLineColorData(uint2 pos, uint2 rotPos, uint index, uint rotSel
     rbgLineColorOut[uint3(pos.xy, index)] = cramColor[cramAddress];
 }
 
-uint4 DrawScrollRBG(uint2 pos, uint index, uint rotSel) {
+uint4 DrawScrollRBG(uint2 pos, uint index, uint rotSel, const RotParamState rotState) {
     const RBGParams params = layerParams[0].rbg[index];
 
     uint2 rotPos = pos;
@@ -748,9 +748,6 @@ uint4 DrawScrollRBG(uint2 pos, uint index, uint rotSel) {
 
     const RBGParams rotParams = layerParams[0].rbg[rotSel];
     const uint2 pageShift = rotParams.base.pageShift;
-
-    const uint rotIndex = GetRotIndex(rotPos, rotSel);
-    const RotParamState rotState = rotParamStates[rotIndex];
 
     // Determine maximum coordinates and screen over process
     const uint screenOverProcess = rotParams.screenOverProcess;
@@ -780,7 +777,7 @@ uint4 DrawScrollRBG(uint2 pos, uint index, uint rotSel) {
     return kTransparentPixel;
 }
 
-uint4 DrawBitmapRBG(uint2 pos, uint index, uint rotSel) {
+uint4 DrawBitmapRBG(uint2 pos, uint index, uint rotSel, const RotParamState rotState) {
     const RBGParams params = layerParams[0].rbg[index];
     const uint screenOverProcess = params.screenOverProcess;
 
@@ -791,9 +788,6 @@ uint4 DrawBitmapRBG(uint2 pos, uint index, uint rotSel) {
     }
 
     const uint2 pageShift = layerParams[0].rbg[rotSel].base.pageShift;
-
-    const uint rotIndex = GetRotIndex(rotPos, rotSel);
-    const RotParamState rotState = rotParamStates[rotIndex];
 
     // Determine maximum coordinates and screen over process
     const bool usingFixed512 = screenOverProcess == kScreenOverProcessFixed512;
@@ -842,8 +836,8 @@ uint4 DrawRBG(uint2 pos, // pixel coordinates
     }
 
     return params.base.bitmap
-        ? DrawBitmapRBG(pos, index, rotSel)
-        : DrawScrollRBG(pos, index, rotSel);
+        ? DrawBitmapRBG(pos, index, rotSel, rotState)
+        : DrawScrollRBG(pos, index, rotSel, rotState);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -1744,6 +1744,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // VDP2 rotation parameter base values buffer
         {
+            static constexpr size_t kRotParamBasesCount = kMaxNormalResV * 2;
             auto builder = vdp2.rotParamBasesBuffer.BufferBuilder(sizeof(vdp2.cpuRotParamBases));
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{fmt::format(
@@ -1761,7 +1762,7 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = 2,
+                        .NumElements = kRotParamBasesCount,
                         .StructureByteStride = sizeof(VDP2RotParamBase),
                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
                     },
@@ -1772,8 +1773,8 @@ struct Direct3D12VDPRenderer::Impl {
 
         // VDP2 rotation parameter states buffer
         {
-            static constexpr size_t kRotParamsSize = vdp::kMaxNormalResH * vdp::kMaxNormalResV;
-            auto builder = vdp2.rotParamStatesBuffer.BufferBuilder(kRotParamsSize * 2);
+            static constexpr size_t kRotParamsCount = vdp::kMaxNormalResH * vdp::kMaxNormalResV * 2;
+            auto builder = vdp2.rotParamStatesBuffer.BufferBuilder(kRotParamsCount * sizeof(VDP2RotParamState));
             builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -1791,8 +1792,8 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = 2,
-                        .StructureByteStride = kRotParamsSize,
+                        .NumElements = kRotParamsCount,
+                        .StructureByteStride = sizeof(VDP2RotParamState),
                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
                     },
             };
@@ -1808,8 +1809,8 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = 2,
-                        .StructureByteStride = kRotParamsSize,
+                        .NumElements = kRotParamsCount,
+                        .StructureByteStride = sizeof(VDP2RotParamState),
                         .CounterOffsetInBytes = 0,
                         .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
                     },
@@ -1872,6 +1873,61 @@ struct Direct3D12VDPRenderer::Impl {
             };
             device->CreateShaderResourceView(vdp2.composeParamsBuffer.GetPointer(), &srvDesc,
                                              vdp2.composeParamsSRV.cpuHandle);
+        }
+
+        // Build compute shader, root signature, pipeline state object and descriptors for calculating rotparams
+        {
+            auto shaderBlobResult = LoadShader("src/vdp/vdp2_calc_rotparams_cs.cso");
+            if (!shaderBlobResult) {
+                return util::ErrorMessage{
+                    fmt::format("Could not load VDP2 rotation parameters calculation compute shader: {}",
+                                shaderBlobResult.Error().message)};
+            }
+            vdp2.calcRotParamsShader.format = gpu::ShaderBytecodeFormat::DXIL;
+            vdp2.calcRotParamsShader.bytecode = shaderBlobResult.Value();
+            vdp2.calcRotParamsShader.entrypoint = kCSEntrypoint;
+            auto result = gpu::ValidateShader(vdp2.calcRotParamsShader);
+            if (!result) {
+                return util::ErrorMessage{
+                    fmt::format("VDP2 rotation parameters calculation compute shader validation failed: {}",
+                                result.Error().message)};
+            }
+
+            auto rootSigBuilder = vdp2.calcRotParamsRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
+            rootSigBuilder.AddDescriptorTable()
+                .AddSRVs(4, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(1, 0);
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not build VDP2 rotation parameters calculation root signature, error code {:X}",
+                                (uint32)hr)};
+            }
+            vdp2.calcRotParamsRootSig->SetName(L"[Ymir-VDP2] Rotation parameters calculation root signature");
+
+            const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+                .pRootSignature = vdp2.calcRotParamsRootSig.GetPointer(),
+                .CS = ToShaderBytecode(vdp2.calcRotParamsShader),
+            };
+            if (HRESULT hr = vdp2.calcRotParamsPSO.CreateCompute(device, psoDesc); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not build VDP2 rotation parameters calculation pipeline state object, error code {:X}",
+                    (uint32)hr)};
+            }
+            vdp2.calcRotParamsPSO->SetName(L"[Ymir-VDP2] Rotation parameters calculation pipeline state object");
+
+            const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                vdp2.rotRegsSRV.cpuHandle,      vdp2.rotParamBasesSRV.cpuHandle,  vdp2.vramSRV.cpuHandle,
+                vdp2.cramRotCoeffSRV.cpuHandle, vdp2.rotParamStatesUAV.cpuHandle,
+            };
+            const UINT srcSizes[] = {1, 1, 1, 1, 1, 1, 1};
+
+            if (!resourceHeapAlloc.Allocate(vdp2.calcRotParamsDescs, std::size(srcHandles))) {
+                return util::ErrorMessage{"Could not allocate VDP2 rotation parameters calculation descriptors"};
+            }
+
+            device->CopyDescriptors(1, &vdp2.calcRotParamsDescs.cpuHandle, &vdp2.calcRotParamsDescs.count,
+                                    std::size(srcHandles), srcHandles, srcSizes, resourceHeap.GetHeapType());
         }
 
         // Build compute shader, root signature, pipeline state object and descriptors for drawing layers
@@ -2825,6 +2881,32 @@ struct Direct3D12VDPRenderer::Impl {
         }
     }
 
+    util::VoidResult<> VDP2UploadRotationParameterBases() {
+        ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
+        UploadAllocation alloc{};
+
+        BufferTransitionBarrierSet barrier{features.enhancedBarriers};
+        barrier.Add(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                    D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        barrier.Emit(vdp2.cmdList);
+
+        const size_t size = sizeof(vdp2.cpuRotParamBases);
+        if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
+            return util::ErrorMessage{fmt::format(
+                "Failed to allocate upload buffer for VDP2 rotation parameter bases: {}", result.Error().message)};
+        }
+        memcpy(alloc.data, &vdp2.cpuRotParamBases, size);
+
+        ID3D12Resource *dstResource = vdp2.rotParamBasesBuffer.GetPointer();
+        vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+        barrier.Reverse().Emit(vdp2.cmdList);
+
+        return {};
+    }
+
     void VDP2UpdateState() {
         if (auto result = VDP2FlushVRAM(); !result) {
             devlog::warn<grp::dx12_vdp2>("VDP2 VRAM flush failed: {}", result.Error().message);
@@ -2872,6 +2954,14 @@ struct Direct3D12VDPRenderer::Impl {
                      D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_COMPUTE_SHADING,                  //
                      D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON,                  //
                      D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        barriers.Add(vdp2.rotRegsBuffer.GetPointer(), sizeof(vdp2.cpuRotRegs),    //
+                     D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                     D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        barriers.Add(vdp2.rotParamBasesBuffer.GetPointer(), sizeof(vdp2.cpuRotParamBases), //
+                     D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY,          //
+                     D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST,          //
+                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
         barriers.Emit(cmdList);
 
         const bool deinterlace = enhancements.deinterlace && vdpState.regs2.TVMD.IsInterlaced();
@@ -2888,19 +2978,17 @@ struct Direct3D12VDPRenderer::Impl {
         if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
             vdp2.cpuCommonRenderParams.startY = startY;
 
-            // VDP2UploadRotationParameterBases();
+            VDP2UploadRotationParameterBases();
 
-            // TODO: configure and execute rotparams shader
-
-            // const bool doubleResH = vdpState.regs2.TVMD.HRESOn & 0b010;
-            // const uint32 hresShift = doubleResH ? 1 : 0;
-            // const uint32 hres = HRes >> hresShift;
-            // cmdList->SetPipelineState(vdp2.calcRotParamsPSO.GetPointer());
-            // cmdList->SetComputeRootSignature(vdp2.calcRotParamsRootSig.GetPointer());
-            // cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
-            //                                       &vdp2.cpuCommonRenderParams, 0);
-            // cmdList->SetComputeRootDescriptorTable(1, vdp2.calcRotParamsDescs.gpuHandle);
-            // vdp2.cmdList->Dispatch(hres / 32, numLines, 1);
+            const bool doubleResH = vdpState.regs2.TVMD.HRESOn & 0b010;
+            const uint32 hresShift = doubleResH ? 1 : 0;
+            const uint32 hres = HRes >> hresShift;
+            cmdList->SetPipelineState(vdp2.calcRotParamsPSO.GetPointer());
+            cmdList->SetComputeRootSignature(vdp2.calcRotParamsRootSig.GetPointer());
+            cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
+                                                  &vdp2.cpuCommonRenderParams, 0);
+            cmdList->SetComputeRootDescriptorTable(1, vdp2.calcRotParamsDescs.gpuHandle);
+            vdp2.cmdList->Dispatch(hres / 32, numLines, 1);
         }
 
         vdp2.cpuCommonRenderParams.startY = startY << yShift;
@@ -2963,8 +3051,8 @@ struct Direct3D12VDPRenderer::Impl {
         // render lines up to Y-1 then sync the state, unless Y=0, in which case we just sync the state.
 
         if (y > 0) {
-            const bool renderLayers = vdp2.vramDirty || vdp2.cramDirty /*|| vdp2.rotRegsDirty*/ ||
-                                      vdp2.layerRenderParamsDirty /*|| vdp2.composeParamsDirty*/;
+            const bool renderLayers = vdp2.vramDirty || vdp2.cramDirty || vdp2.rotRegsDirty ||
+                                      vdp2.layerRenderParamsDirty || vdp2.composeParamsDirty;
             const bool compose = vdp2.composeParamsDirty;
             if (renderLayers) {
                 VDP2RenderLayerLines(y - 1);
