@@ -29,6 +29,9 @@ static const uint kPageSizes[2][2] = { { 13, 14 }, { 11, 12 } };
 static const uint kMaxNormalResH = 352;
 static const uint kMaxNormalResV = 256;
 
+static const uint kMaxResH = 704;
+static const uint kMaxResV = 512;
+
 static const uint kRotParamLinePitch = kMaxNormalResH;
 static const uint kRotParamEntryStride = kRotParamLinePitch * kMaxNormalResV;
 
@@ -50,11 +53,12 @@ static const uint kScreenOverProcessRepeatChar = 1;
 static const uint kScreenOverProcessTransparent = 2;
 static const uint kScreenOverProcessFixed512 = 3;
 
-static const uint kPixelAttrBitSpriteColorMSB = 3;
-static const uint kPixelAttrBitSpriteShadowWindow = 4;
-static const uint kPixelAttrBitSpriteNormalShadow = 5;
 static const uint kPixelAttrBitSpecColorCalc = 6;
 static const uint kPixelAttrBitTransparent = 7;
+
+static const uint kSpriteAttrBitColorMSB = 5;
+static const uint kSpriteAttrBitShadowWindow = 6;
+static const uint kSpriteAttrBitNormalShadow = 7;
 
 static const uint kColorGradScreenSprite = 0;
 static const uint kColorGradScreenRBG0 = 1;

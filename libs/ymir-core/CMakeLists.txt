@@ -399,6 +399,7 @@ set(COMPUTE_SHADER_SOURCES
     res/shaders/src/vdp/vdp2_calc_rotparams_cs.hlsl
     res/shaders/src/vdp/vdp2_compose_cs.hlsl
     res/shaders/src/vdp/vdp2_render_bgs_cs.hlsl
+    res/shaders/src/vdp/vdp2_render_ccwindow_cs.hlsl
 )
 ## TODO: add per-platform shader code if needed
 # if (WIN32)

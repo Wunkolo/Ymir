@@ -12,12 +12,12 @@ cbuffer CommonRenderParams : register(b0) {
 
 StructuredBuffer<ComposeParams> composeParams : register(t1);
 Texture2DArray<uint4> layerIn : register(t2);
-StructuredBuffer<uint4> lineColorIn : register(t3);
+StructuredBuffer<uint4> lnclBackIn : register(t3);
 Texture2DArray<uint4> rbgLineColorIn : register(t4);
-// Texture2D<uint> spriteAttrsIn : register(t5);
-// Texture2D<uint4> colorCalcWindowIn : register(t6);
+Texture2D<uint> spriteAttrsIn : register(t5);
+Texture2D<uint4> colorCalcWindowIn : register(t6);
 
-RWTexture2D<float4> textureOut : register(u0);
+RWTexture2D<float4> compositeOut : register(u0);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -55,5 +55,5 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint2 outCoord = uint2(drawCoord.x, GetOutputY(drawCoord.y));
     const uint3 outColor = Compose(drawCoord);
-    textureOut[outCoord] = float4(outColor / 255.0, 1.0f);
+    compositeOut[outCoord] = float4(outColor / 255.0, 1.0f);
 }
