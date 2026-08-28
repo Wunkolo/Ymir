@@ -6,26 +6,22 @@
 ##   Vulkan - SPIR-V
 ##   Metal - SPIR-V -> MetalLib
 ##
-## Requires either DXC (DirectX Shader Compiler) or shaderc.
-## On Windows, DXC is mandatory as Direct3D 12 can only consume DXIL shaders.
-## On Linux and macOS, either DXC or shaderc are accepted.
+## Requires DXC (DirectX Shader Compiler) on all platforms.
+## glslc (shaderc) cannot be used as it lacks support for several modern HLSL
+## features, including 64-bit integers, that some shader rely on.
 ##
 ## When locating DXC, this script prefers the compiler included with Vulkan SDK
 ## as it supports SPIR-V. It falls back to system-provided DXC otherwise, such
 ## as Visual Studio's DXC which only targets DXIL (in which case the lack of
 ## SPIR-V support doesn't matter).
 ##
-## On macOS, DXC with SPIR-V support or shaderc is required for the first
-## compilation step. Later steps require metal and metallib.
+## On macOS, DXC with SPIR-V support is required for the first compilation step.
+## Later steps require metal and metallib.
 ##
 ## Outputs:
 ##   DXC_EXECUTABLE (STRING): path to DXC executable
 ##   DXC_DXIL_SUPPORTED (BOOL): whether the DXC executable can output DXIL
 ##   DXC_SPIRV_SUPPORTED (BOOL): whether the DXC executable can output SPIR-V
-##   SHADERC_EXECUTABLE (STRING): path to shaderc executable
-##   SPIRV_COMPILER_NAME (STRING): name of the program that will be used to
-##     compile shaders to SPIR-V, either "DXC" or "shaderc". Blank string if
-##     SPIR-V shader compilation is not supported.
 
 # Try to locate DXC in Vulkan SDK.
 find_program(DXC_EXECUTABLE_VULKAN
@@ -75,21 +71,9 @@ if (DXC_EXECUTABLE)
     endif ()
 endif ()
 
-# Try shaderc if DXC cannot be found or doesn't support SPIR-V.
-# Also search in Vulkan SDK for consistency and convenience.
-if (NOT DXC_EXECUTABLE OR NOT DXC_SPIRV_SUPPORTED)
-    find_program(SHADERC_EXECUTABLE
-        NAMES glslc
-        HINTS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/bin64"
-    )
-endif ()
-
-# Bail out if neither executable could be found.
-# DXC is required on Windows (already checked earlier).
-# DXC or glslc are required on macOS.
-# On Linux, either compiler is required only if Vulkan is supported.
-if ((WIN32 OR APPLE OR Vulkan_FOUND) AND NOT DXC_EXECUTABLE AND NOT SHADERC_EXECUTABLE)
-    message(FATAL_ERROR "Could NOT find DXC nor shaderc. Cannot compile shaders.")
+# SPIR-V is required on systems other than Windows if Vulkan is supported. Bail out if that's not the case.
+if (NOT WIN32 AND Vulkan_FOUND AND NOT DXC_EXECUTABLE)
+    message(FATAL_ERROR "Could NOT find a shader compiler supporting SPIR-V. Cannot compile shaders.")
 endif ()
 
 if (APPLE)
@@ -122,19 +106,6 @@ if (APPLE)
     endif ()
 endif ()
 
-# Check SPIR-V support
-set(SPIRV_COMPILER_NAME "")
-if (DXC_SPIRV_SUPPORTED)
-    set(SPIRV_COMPILER_NAME "DXC")
-elseif (SHADERC_EXECUTABLE)
-    set(SPIRV_COMPILER_NAME "shaderc")
-endif ()
-
-# SPIR-V is required on systems other than Windows if Vulkan is supported. Bail out if that's not the case.
-if (NOT WIN32 AND Vulkan_FOUND AND NOT SPIRV_COMPILER_NAME)
-    message(FATAL_ERROR "Could NOT find a shader compiler supporting SPIR-V. Cannot compile shaders.")
-endif ()
-
 # Output status
 if (DXC_EXECUTABLE)
     message(STATUS "DXC found: ${DXC_EXECUTABLE}")
@@ -144,15 +115,8 @@ if (DXC_EXECUTABLE)
     if (DXC_SPIRV_SUPPORTED)
         message(STATUS "DXC supports SPIR-V shaders")
     endif ()
-endif ()
-if (SHADERC_EXECUTABLE)
-    message(STATUS "shaderc found: ${SHADERC_EXECUTABLE}")
-endif ()
-if (SPIRV_COMPILER_NAME)
-    message(STATUS "${SPIRV_COMPILER_NAME} will be used to compile shaders to SPIR-V")
-endif ()
-if (NOT DXC_EXECUTABLE AND NOT SHADERC_EXECUTABLE)
-    message(STATUS "DXC and shaderc not found. No shaders will be compiled.")
+else ()
+    message(STATUS "DXC not found. No shaders will be compiled.")
 
     # Define dummy no-op function to avoid breaking builds without Vulkan support
     function(compile_shader)
@@ -317,28 +281,8 @@ function(_shader_make_generate_depfile_command)
             "${ARG_SOURCE}"
         )
         set(${ARG_OUT_COMMAND} ${_command} PARENT_SCOPE)
-    elseif (SHADERC_EXECUTABLE)
-        _shader_get_glslc_args_for_profile(
-            OUT_STAGE _glslc_stage
-            OUT_TARGET_ENV _glslc_target_env
-            PROFILE ${ARG_PROFILE}
-        )
-        set(_command COMMAND "${SHADERC_EXECUTABLE}"
-            -x hlsl
-            "-fshader-stage=${_glslc_stage}"
-            "--target-env=${_glslc_target_env}"
-            "-M" "${ARG_SOURCE}"
-            "-o" "${ARG_DEPFILE}"
-            "-fentry-point=${ARG_ENTRYPOINT}"
-            ${_include_paths_args}
-            ${_macro_args}
-        )
-        set(${ARG_OUT_COMMAND} ${_command} PARENT_SCOPE)
     else ()
-        message(FATAL_ERROR
-            "Neither DXC nor shaderc are available. "
-            "Cannot generate dependency list command"
-        )
+        message(FATAL_ERROR "DXC is not available. Cannot generate dependency list command.")
     endif ()
 endfunction()
 
@@ -505,7 +449,7 @@ function(_shader_make_compile_spirv_command)
     list(TRANSFORM ARG_INCLUDE_PATHS PREPEND "-I" OUTPUT_VARIABLE _include_paths_args)
     list(TRANSFORM ARG_MACROS PREPEND "-D" OUTPUT_VARIABLE _macro_args)
 
-    if (${SPIRV_COMPILER_NAME} STREQUAL "DXC")
+    if (DXC_SPIRV_SUPPORTED)
         set(_compile_flags "")
         if (CMAKE_BUILD_TYPE STREQUAL "Debug")
             list(APPEND _compile_flags "-fspv-debug=vulkan-with-source")
@@ -526,33 +470,6 @@ function(_shader_make_compile_spirv_command)
                 "${ARG_SOURCE}"
             PARENT_SCOPE
         )
-    elseif (${SPIRV_COMPILER_NAME} STREQUAL "shaderc")
-        set(_compile_flags "")
-        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-            list(APPEND _compile_flags "-O0" "-g")
-        else ()
-            list(APPEND _compile_flags "-O")
-        endif ()
-        # if (NOT ARG_INCLUDE_REFLECTION)
-        #     TODO: invoke spirv-opt --strip-debug
-        # endif ()
-
-        _shader_get_glslc_args_for_profile(
-            OUT_STAGE _glslc_stage
-            OUT_TARGET_ENV _glslc_target_env
-            PROFILE ${ARG_PROFILE}
-        )
-        set(_command COMMAND "${SHADERC_EXECUTABLE}"
-            -x hlsl
-            "-fshader-stage=${_glslc_stage}"
-            "--target-env=${_glslc_target_env}"
-            "-fentry-point=${ARG_ENTRYPOINT}"
-            ${_include_paths_args}
-            ${_macro_args}
-            "-o" "${ARG_DESTINATION}"
-            "${ARG_SOURCE}"
-        )
-        set(${ARG_OUT_COMMAND} ${_command} PARENT_SCOPE)
     else ()
         set(${ARG_OUT_COMMAND} "" PARENT_SCOPE)
     endif ()
