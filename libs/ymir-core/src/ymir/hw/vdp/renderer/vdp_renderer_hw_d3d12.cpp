@@ -3187,15 +3187,6 @@ struct Direct3D12VDPRenderer::Impl {
                                                   &vdp2.cpuCommonRenderParams, 0);
             cmdList->SetComputeRootDescriptorTable(1, vdp2.calcRotParamsDescs.gpuHandle);
             vdp2.cmdList->Dispatch(hres / 32, numLines, 1);
-
-            {
-                D3D12_RESOURCE_BARRIER uavBarrier{
-                    .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
-                    .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                    .UAV = {.pResource = vdp2.rotParamStatesBuffer.GetPointer()},
-                };
-                cmdList->ResourceBarrier(1, &uavBarrier);
-            }
         }
 
         vdp2.cpuCommonRenderParams.startY = startY << yShift;
@@ -3211,15 +3202,6 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->SetComputeRootDescriptorTable(1, vdp2.drawCCWindowDescs.gpuHandle);
         cmdList->Dispatch(HRes / 32, numLines, 1);
 
-        {
-            D3D12_RESOURCE_BARRIER uavBarrier{
-                .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
-                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                .UAV = {.pResource = vdp2.colorCalcWindowTexture.GetPointer()},
-            };
-            cmdList->ResourceBarrier(1, &uavBarrier);
-        }
-
         // Draw NBGs and RBGs
         cmdList->SetPipelineState(vdp2.drawBGsPSO.GetPointer());
         cmdList->SetComputeRootSignature(vdp2.drawBGsRootSig.GetPointer());
@@ -3227,22 +3209,6 @@ struct Direct3D12VDPRenderer::Impl {
                                               &vdp2.cpuCommonRenderParams, 0);
         cmdList->SetComputeRootDescriptorTable(1, vdp2.drawBGsDescs.gpuHandle);
         cmdList->Dispatch(HRes / 32, numLines, 1);
-
-        {
-            D3D12_RESOURCE_BARRIER uavBarriers[] = {
-                {
-                    .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
-                    .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                    .UAV = {.pResource = vdp2.layerOutTexture.GetPointer()},
-                },
-                {
-                    .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
-                    .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                    .UAV = {.pResource = vdp2.rbgLineColorOutTexture.GetPointer()},
-                },
-            };
-            cmdList->ResourceBarrier(std::size(uavBarriers), uavBarriers);
-        }
     }
 
     void VDP2ComposeLines(uint32 y) {
@@ -3267,6 +3233,34 @@ struct Direct3D12VDPRenderer::Impl {
                      D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON, //
                      D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         barriers.Emit(cmdList);
+
+        // Apply UAV barriers
+        {
+            std::vector<D3D12_RESOURCE_BARRIER> uavBarriers{};
+            if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
+                uavBarriers.push_back({
+                    .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
+                    .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                    .UAV = {.pResource = vdp2.rotParamStatesBuffer.GetPointer()},
+                });
+            }
+            uavBarriers.push_back({
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .UAV = {.pResource = vdp2.colorCalcWindowTexture.GetPointer()},
+            });
+            uavBarriers.push_back({
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .UAV = {.pResource = vdp2.layerOutTexture.GetPointer()},
+            });
+            uavBarriers.push_back({
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .UAV = {.pResource = vdp2.rbgLineColorOutTexture.GetPointer()},
+            });
+            cmdList->ResourceBarrier(uavBarriers.size(), uavBarriers.data());
+        }
 
         // Determine how many lines to draw and update next scanline counter
         const uint32 numLines = y - vdp2.nextComposeLine + 1;
