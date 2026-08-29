@@ -56,6 +56,7 @@ static const uint kScreenOverProcessFixed512 = 3;
 static const uint kPixelAttrBitSpecColorCalc = 6;
 static const uint kPixelAttrBitTransparent = 7;
 
+static const uint kSpriteAttrBitColorCalcRatio = 0; // bits 0 to 4
 static const uint kSpriteAttrBitColorMSB = 5;
 static const uint kSpriteAttrBitShadowWindow = 6;
 static const uint kSpriteAttrBitNormalShadow = 7;
@@ -77,5 +78,6 @@ static const uint kLayerIndexSprite = 6;
 static const uint kLayerIndexMesh = 7;
 
 static const uint4 kTransparentPixel = uint4(0, 0, 0, 1u << kPixelAttrBitTransparent);
+static const uint4 kBlackPixel = uint4(0, 0, 0, 0);
 
 #endif

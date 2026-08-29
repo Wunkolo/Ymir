@@ -12,7 +12,7 @@ cbuffer CommonRenderParams : register(b0) {
 
 StructuredBuffer<LayerRenderParams> layerParams : register(t1);
 ByteAddressBuffer vram : register(t2);
-StructuredBuffer<uint> spriteAttrsIn : register(t3);
+Texture2DArray<uint> spriteAttrsIn : register(t3);
 
 RWTexture2D<uint4> colorCalcWindowOut : register(u0);
 
@@ -94,7 +94,7 @@ bool InsideWindow(GlobalWindowParams window, bool invert, uint2 pos) {
 }
 
 bool InsideSpriteWindow(bool invert, uint2 pos) {
-    return BitTest(spriteAttrsIn[pos.x + pos.y * kMaxResH], kSpriteAttrBitShadowWindow) != invert;
+    return BitTest(spriteAttrsIn[uint3(pos, 0)], kSpriteAttrBitShadowWindow) != invert;
 }
 
 bool InsideWindows(uint windowParams, uint2 pos) {

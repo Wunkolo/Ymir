@@ -16,7 +16,7 @@ StructuredBuffer<RotRegs> rotRegs : register(t2);
 ByteAddressBuffer vram : register(t3);
 Buffer<uint4> cramColor : register(t4);
 StructuredBuffer<RotParamState> rotParamStates : register(t5);
-StructuredBuffer<uint> spriteAttrsIn : register(t6);
+Texture2DArray<uint> spriteAttrsIn : register(t6);
 
 RWTexture2DArray<uint4> layerOut : register(u0);
 RWTexture2DArray<uint4> rbgLineColorOut : register(u1);
@@ -111,7 +111,7 @@ bool InsideWindow(GlobalWindowParams window, bool invert, uint2 pos) {
 }
 
 bool InsideSpriteWindow(bool invert, uint2 pos) {
-    return BitTest(spriteAttrsIn[pos.x + pos.y * kMaxResH], kSpriteAttrBitShadowWindow) != invert;
+    return BitTest(spriteAttrsIn[uint3(pos, 0)], kSpriteAttrBitShadowWindow) != invert;
 }
 
 bool InsideWindows(LayerWindowParams layerWindows, uint2 pos) {

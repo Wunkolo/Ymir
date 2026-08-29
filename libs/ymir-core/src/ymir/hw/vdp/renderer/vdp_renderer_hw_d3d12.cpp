@@ -1099,7 +1099,7 @@ struct Direct3D12VDPRenderer::Impl {
         // Blend mode
         //   0 = alpha
         //   1 = additive
-        HLSLuint blendMode;
+        HLSLbool useAdditiveBlend;
 
         // Use second screen ratio
         HLSLbool useSecondScreenRatio;
@@ -1264,7 +1264,7 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief RBG0-1 line color outputs UAV (offline).
         DescriptorRange rbgLineColorOutUAV;
 
-        /// @brief 2D texture color calculation window buffer.
+        /// @brief Color calculation window 2D texture.
         D3D12Resource colorCalcWindowTexture;
         /// @brief Color calculation window SRV (offline).
         DescriptorRange colorCalcWindowSRV;
@@ -1299,11 +1299,11 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief VDP2 rotation parameter states buffer UAV (offline).
         DescriptorRange rotParamStatesUAV;
 
-        /// @brief VDP2 sprite attributes buffer.
-        D3D12Resource spriteAttrsBuffer;
-        /// @brief VDP2 sprite attributes buffer SRV (offline).
+        /// @brief VDP2 sprite attributes 2D texture array (sprite then mesh).
+        D3D12Resource spriteAttrsTexture;
+        /// @brief VDP2 sprite attributes SRV (offline).
         DescriptorRange spriteAttrsSRV;
-        /// @brief VDP2 sprite attributes buffer UAV (offline).
+        /// @brief VDP2 sprite attributes UAV (offline).
         DescriptorRange spriteAttrsUAV;
 
         /// @brief 2D texture for the composited VDP2 output.
@@ -1659,7 +1659,7 @@ struct Direct3D12VDPRenderer::Impl {
                                              vdp2.rbgLineColorOutSRV.cpuHandle);
 
             if (!offlineHeapAlloc.Allocate(vdp2.rbgLineColorOutUAV)) {
-                return util::ErrorMessage{"Could not allocate layer outputs texture array UAV"};
+                return util::ErrorMessage{"Could not allocate RBG line color outputs texture array UAV"};
             }
             const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
                 .Format = kFormat,
@@ -1885,51 +1885,55 @@ struct Direct3D12VDPRenderer::Impl {
                                               vdp2.rotParamStatesUAV.cpuHandle);
         }
 
-        // VDP2 sprite attributes buffer
+        // VDP2 sprite attributes 2D texture array
         {
-            static constexpr size_t kSize = vdp::kMaxResH * vdp::kMaxResV;
-            auto builder = vdp2.spriteAttrsBuffer.BufferBuilder(kSize);
+            static constexpr UINT16 kNumLayers = 2;
+            static constexpr DXGI_FORMAT kFormat = DXGI_FORMAT_R8_UINT;
+
+            auto builder = vdp2.spriteAttrsTexture.Texture2DBuilder(kMaxResH, kMaxResV, kNumLayers);
+            builder.Format(kFormat);
             builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
-                    fmt::format("Could not create VDP2 sprite attributes buffer, error code {:X}", (uint32)hr)};
+                    fmt::format("Could not create sprite attribtues texture array, error code {:X}", (uint32)hr)};
             }
-            vdp2.spriteAttrsBuffer->SetName(L"[Ymir-VDP2] Sprite attributes buffer");
+            vdp2.spriteAttrsTexture->SetName(L"[Ymir-VDP2] Sprite attribtues texture array");
 
             if (!offlineHeapAlloc.Allocate(vdp2.spriteAttrsSRV)) {
-                return util::ErrorMessage{"Could not allocate VDP2 sprite attributes buffer SRV"};
+                return util::ErrorMessage{"Could not allocate sprite attribtues texture array SRV"};
             }
             const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-                .Format = DXGI_FORMAT_UNKNOWN,
-                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                .Format = kFormat,
+                .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY,
                 .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                .Buffer =
+                .Texture2DArray =
                     {
-                        .FirstElement = 0,
-                        .NumElements = 1,
-                        .StructureByteStride = kSize,
-                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                        .MostDetailedMip = 0,
+                        .MipLevels = 1,
+                        .FirstArraySlice = 0,
+                        .ArraySize = kNumLayers,
+                        .PlaneSlice = 0,
+                        .ResourceMinLODClamp = 0.0f,
                     },
             };
-            device->CreateShaderResourceView(vdp2.spriteAttrsBuffer.GetPointer(), &srvDesc,
+            device->CreateShaderResourceView(vdp2.spriteAttrsTexture.GetPointer(), &srvDesc,
                                              vdp2.spriteAttrsSRV.cpuHandle);
 
             if (!offlineHeapAlloc.Allocate(vdp2.spriteAttrsUAV)) {
-                return util::ErrorMessage{"Could not VDP2 sprite attributes buffer UAV"};
+                return util::ErrorMessage{"Could not allocate sprite attributes texture array UAV"};
             }
             const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
-                .Format = DXGI_FORMAT_UNKNOWN,
-                .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
-                .Buffer =
+                .Format = kFormat,
+                .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY,
+                .Texture2DArray =
                     {
-                        .FirstElement = 0,
-                        .NumElements = 1,
-                        .StructureByteStride = kSize,
-                        .CounterOffsetInBytes = 0,
-                        .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
+                        .MipSlice = 0,
+                        .FirstArraySlice = 0,
+                        .ArraySize = kNumLayers,
+                        .PlaneSlice = 0,
                     },
             };
-            device->CreateUnorderedAccessView(vdp2.spriteAttrsBuffer.GetPointer(), nullptr, &uavDesc,
+            device->CreateUnorderedAccessView(vdp2.spriteAttrsTexture.GetPointer(), nullptr, &uavDesc,
                                               vdp2.spriteAttrsUAV.cpuHandle);
         }
 
@@ -2888,7 +2892,7 @@ struct Direct3D12VDPRenderer::Impl {
                                  | (regs2.lineScreenParams.colorCalcEnable << 7) //
             ;
         params.extendedColorCalc = regs2.colorCalcParams.extendedColorCalcEnable && regs2.TVMD.HRESOn < 2;
-        params.blendMode = regs2.colorCalcParams.useAdditiveBlend;
+        params.useAdditiveBlend = regs2.colorCalcParams.useAdditiveBlend;
         params.useSecondScreenRatio = regs2.colorCalcParams.useSecondScreenRatio;
         params.colorOffsetEnable = PackBools<HLSLuint>(regs2.colorOffsetEnable);
         params.colorOffsetSelect = PackBools<HLSLuint>(regs2.colorOffsetSelect);
@@ -3155,10 +3159,6 @@ struct Direct3D12VDPRenderer::Impl {
         barriers.Add(vdp2.rotParamBasesBuffer.GetPointer(), sizeof(vdp2.cpuRotParamBases), //
                      D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_COMPUTE_SHADING,          //
                      D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON,          //
-                     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        barriers.Add(vdp2.spriteAttrsBuffer.GetPointer(), kMaxResH * kMaxResV,    //
-                     D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_COMPUTE_SHADING, //
-                     D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON, //
                      D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         barriers.Emit(cmdList);
 
