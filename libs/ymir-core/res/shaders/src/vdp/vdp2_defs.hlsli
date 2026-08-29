@@ -1,6 +1,8 @@
 #ifndef YMIR_VDP_VDP2_DEFS_HLSLI
 #define YMIR_VDP_VDP2_DEFS_HLSLI
 
+static const uint kVDP1FBRAMSize = 256 * 1024;
+
 static const uint kResolutionsH[4] = { 320, 352, 640, 704 };
 static const uint kResolutionsV[4] = { 224, 240, 256, 256 };
 

@@ -97,14 +97,14 @@ bool InsideSpriteWindow(bool invert, uint2 pos) {
     return BitTest(spriteAttrsIn[uint3(pos, 0)], kSpriteAttrBitShadowWindow) != invert;
 }
 
-bool InsideWindows(uint windowParams, uint2 pos) {
-    const bool windowLogicAND = BitTest(windowParams, 0);
-    const bool window0Enable = BitTest(windowParams, 1);
-    const bool window0Invert = BitTest(windowParams, 2);
-    const bool window1Enable = BitTest(windowParams, 3);
-    const bool window1Invert = BitTest(windowParams, 4);
-    const bool spriteWindowEnable = BitTest(windowParams, 5);
-    const bool spriteWindowInvert = BitTest(windowParams, 6);
+bool InsideWindows(uint2 pos) {
+    const bool windowLogicAND = BitTest(g_commonParams.windows, 5);
+    const bool window0Enable = BitTest(g_commonParams.windows, 6);
+    const bool window0Invert = BitTest(g_commonParams.windows, 7);
+    const bool window1Enable = BitTest(g_commonParams.windows, 8);
+    const bool window1Invert = BitTest(g_commonParams.windows, 9);
+    const bool spriteWindowEnable = BitTest(g_commonParams.windows, 10);
+    const bool spriteWindowInvert = BitTest(g_commonParams.windows, 11);
 
     // If no windows are enabled, consider the pixel outside of windows
     if (!window0Enable && !window1Enable && !spriteWindowEnable) {
@@ -147,5 +147,5 @@ bool InsideWindows(uint windowParams, uint2 pos) {
 void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint3 outCoord = uint3(drawCoord.x, GetY(drawCoord.y), id.z);
-    colorCalcWindowOut[outCoord.xy] = InsideWindows(g_commonParams.windows >> 5, drawCoord);
+    colorCalcWindowOut[outCoord.xy] = InsideWindows(drawCoord);
 }

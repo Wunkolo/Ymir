@@ -10,6 +10,15 @@ uint BitExtract(uint value, uint offset, uint length) {
     return (value >> offset) & mask;
 }
 
+uint BitExtract(uint2 value, uint offset, uint length) {
+    const uint mask = (1u << length) - 1u;
+    if (offset < 32) {
+        return (value.x >> offset) & mask;
+    } else {
+        return (value.y >> (offset - 32)) & mask;
+    }
+}
+
 int SignExtend(int value, int bits) {
     const uint shift = 32 - bits;
     return (value << shift) >> shift;

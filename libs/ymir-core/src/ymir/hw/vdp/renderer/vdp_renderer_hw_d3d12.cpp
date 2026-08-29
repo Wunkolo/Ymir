@@ -1446,6 +1446,15 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief Descriptor range for calculating rotation parameters.
         DescriptorRange calcRotParamsDescs;
 
+        /// @brief Compute shader for drawing the sprite layer.
+        gpu::ComputeShader drawSpriteShader;
+        /// @brief Root signature for drawing the sprite layer.
+        D3D12RootSignature drawSpriteRootSig;
+        /// @brief Pipeline state object for drawing the sprite layer.
+        D3D12PipelineState drawSpritePSO;
+        /// @brief Descriptor range for drawing the sprite layer.
+        DescriptorRange drawSpriteDescs;
+
         /// @brief Compute shader for drawing the color calculation window.
         gpu::ComputeShader drawCCWindowShader;
         /// @brief Root signature for drawing the color calculation window.
@@ -2002,12 +2011,12 @@ struct Direct3D12VDPRenderer::Impl {
             builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
-                    fmt::format("Could not create sprite attribtues texture array, error code {:X}", (uint32)hr)};
+                    fmt::format("Could not create sprite attributes texture array, error code {:X}", (uint32)hr)};
             }
-            vdp2.spriteAttrsTexture->SetName(L"[Ymir-VDP2] Sprite attribtues texture array");
+            vdp2.spriteAttrsTexture->SetName(L"[Ymir-VDP2] Sprite attributes texture array");
 
             if (!offlineHeapAlloc.Allocate(vdp2.spriteAttrsSRV)) {
-                return util::ErrorMessage{"Could not allocate sprite attribtues texture array SRV"};
+                return util::ErrorMessage{"Could not allocate sprite attributes texture array SRV"};
             }
             const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
                 .Format = kFormat,
@@ -2153,6 +2162,62 @@ struct Direct3D12VDPRenderer::Impl {
             }
 
             device->CopyDescriptors(1, &vdp2.calcRotParamsDescs.cpuHandle, &vdp2.calcRotParamsDescs.count,
+                                    std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
+        }
+
+        // Build shader, PSO and related resources for drawing the sprite layer
+        {
+            auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_sprite_cs.cso");
+            if (!shaderBlobResult) {
+                return util::ErrorMessage{fmt::format("Could not load VDP2 sprite layer drawing compute shader: {}",
+                                                      shaderBlobResult.Error().message)};
+            }
+            vdp2.drawSpriteShader.format = gpu::ShaderBytecodeFormat::DXIL;
+            vdp2.drawSpriteShader.bytecode = shaderBlobResult.Value();
+            vdp2.drawSpriteShader.entrypoint = kCSEntrypoint;
+            auto result = gpu::ValidateShader(vdp2.drawSpriteShader);
+            if (!result) {
+                return util::ErrorMessage{fmt::format("VDP2 sprite layer drawing compute shader validation failed: {}",
+                                                      result.Error().message)};
+            }
+
+            auto rootSigBuilder = vdp2.drawSpriteRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
+            rootSigBuilder.AddDescriptorTable()
+                .AddSRVs(4, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(2, 0);
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not build VDP2 sprite layer drawing root signature, error code {:X}", (uint32)hr)};
+            }
+            vdp2.drawSpriteRootSig->SetName(L"[Ymir-VDP2] Sprite layer drawing root signature");
+
+            const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+                .pRootSignature = vdp2.drawSpriteRootSig.GetPointer(),
+                .CS = ToShaderBytecode(vdp2.drawSpriteShader),
+            };
+            if (HRESULT hr = vdp2.drawSpritePSO.CreateCompute(device, psoDesc); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not build VDP2 sprite layer drawing pipeline state object, error code {:X}", (uint32)hr)};
+            }
+            vdp2.drawSpritePSO->SetName(L"[Ymir-VDP2] Sprite layer drawing pipeline state object");
+
+            const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                vdp2.layerRenderParamsSRV.cpuHandle,
+                vdp2.vramSRV.cpuHandle,
+                vdp2.cramColorSRV.cpuHandle,
+                vdp2.rotParamStatesSRV.cpuHandle,
+                /* TODO: vdp1.spriteFBSRV.cpuHandle,*/ vdp2.layerOutUAV.cpuHandle,
+                vdp2.spriteAttrsUAV.cpuHandle,
+            };
+            std::array<UINT, std::size(srcHandles)> srcSizes{};
+            srcSizes.fill(1);
+
+            if (!resourceHeapAlloc.Allocate(vdp2.drawSpriteDescs, std::size(srcHandles))) {
+                return util::ErrorMessage{"Could not allocate VDP2 sprite layer drawing descriptors"};
+            }
+
+            device->CopyDescriptors(1, &vdp2.drawSpriteDescs.cpuHandle, &vdp2.drawSpriteDescs.count,
                                     std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
         }
 
@@ -3290,10 +3355,51 @@ struct Direct3D12VDPRenderer::Impl {
 
         vdp2.cpuCommonRenderParams.startY = startY << yShift;
 
-        // TODO: Draw sprite layer
-        // cmdList->Dispatch((HRes + 31) / 32, numLines, enhancements.transparentMeshes ? 2 : 1);
+        // Draw sprite layer
+        {
+            TransitionBarrierSet barrier = MakeTransitionBarrierSet();
+
+            // SRV read -> UAV write
+            static constexpr D3D12_BARRIER_SYNC kSyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+            static constexpr D3D12_BARRIER_ACCESS kAccessBefore = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+            static constexpr D3D12_BARRIER_LAYOUT kLayoutBefore = D3D12_BARRIER_LAYOUT_COMMON;
+            static constexpr D3D12_RESOURCE_STATES kStateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+            static constexpr D3D12_BARRIER_SYNC kSyncAfter = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+            static constexpr D3D12_BARRIER_ACCESS kAccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+            static constexpr D3D12_BARRIER_LAYOUT kLayoutAfter = D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+            static constexpr D3D12_RESOURCE_STATES kStateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+            barrier.AddTexture(vdp2.spriteAttrsTexture.GetPointer(), false, kTexRangeAll, kSyncBefore, kSyncAfter,
+                               kAccessBefore, kAccessAfter, kLayoutBefore, kLayoutAfter, kStateBefore, kStateAfter);
+            barrier.Emit(vdp2.cmdList);
+        }
+        cmdList->SetPipelineState(vdp2.drawSpritePSO.GetPointer());
+        cmdList->SetComputeRootSignature(vdp2.drawSpriteRootSig.GetPointer());
+        cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
+                                              &vdp2.cpuCommonRenderParams, 0);
+        cmdList->SetComputeRootDescriptorTable(1, vdp2.drawSpriteDescs.gpuHandle);
+        cmdList->Dispatch((HRes + 31) / 32, numLines, enhancements.transparentMeshes ? 2 : 1);
 
         // Draw color calculation window
+        {
+            TransitionBarrierSet barrier = MakeTransitionBarrierSet();
+
+            // UAV write -> SRV read
+            static constexpr D3D12_BARRIER_SYNC kSyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+            static constexpr D3D12_BARRIER_ACCESS kAccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+            static constexpr D3D12_BARRIER_LAYOUT kLayoutBefore = D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+            static constexpr D3D12_RESOURCE_STATES kStateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+            static constexpr D3D12_BARRIER_SYNC kSyncAfter = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+            static constexpr D3D12_BARRIER_ACCESS kAccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+            static constexpr D3D12_BARRIER_LAYOUT kLayoutAfter = D3D12_BARRIER_LAYOUT_COMMON;
+            static constexpr D3D12_RESOURCE_STATES kStateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+            barrier.AddTexture(vdp2.spriteAttrsTexture.GetPointer(), false, kTexRangeAll, kSyncBefore, kSyncAfter,
+                               kAccessBefore, kAccessAfter, kLayoutBefore, kLayoutAfter, kStateBefore, kStateAfter);
+            barrier.Emit(vdp2.cmdList);
+        }
         cmdList->SetPipelineState(vdp2.drawCCWindowPSO.GetPointer());
         cmdList->SetComputeRootSignature(vdp2.drawCCWindowRootSig.GetPointer());
         cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
@@ -3304,6 +3410,7 @@ struct Direct3D12VDPRenderer::Impl {
         // Draw NBGs and RBGs
         if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
             TransitionBarrierSet barrier = MakeTransitionBarrierSet();
+
             // UAV write -> SRV read
             barrier.AddBuffer(vdp2.rotParamStatesBuffer.GetPointer(),                                               //
                               D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COMPUTE_SHADING,               //
