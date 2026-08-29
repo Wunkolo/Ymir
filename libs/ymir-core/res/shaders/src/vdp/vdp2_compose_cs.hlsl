@@ -163,10 +163,14 @@ int GetColorCalcRatio(uint layer, uint2 pos) {
         case kLayerNBG1_EXBG:
         case kLayerNBG2:
         case kLayerNBG3:
-            return BitExtract(composeParams[0].bgColorCalcRatios, (layer - kLayerRBG0) * 5, 5);
+            return composeParams[0].bgColorCalcRatios[layer - kLayerRBG0];
         case kLayerBack:
         case kLayerLine:
-            return BitExtract(composeParams[0].backLineColorCalcRatios, IsColorCalcEnabled(layer, uint2(pos.x, GetLoResInputY(pos.y))) ? 5 : 0, 5);
+            if (IsColorCalcEnabled(layer, uint2(pos.x, GetLoResInputY(pos.y)))) {
+                return composeParams[0].backLineColorCalcRatios[1];
+            } else {
+                return composeParams[0].backLineColorCalcRatios[0];
+            }
         default:
             return 31;
     }
