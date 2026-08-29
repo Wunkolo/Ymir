@@ -385,6 +385,18 @@ static constexpr D3D12_BARRIER_SUBRESOURCE_RANGE kTexRangeAll{
     .NumMipLevels = 0,
 };
 
+// Texture UAV write
+static constexpr D3D12_BARRIER_SYNC kSyncUAV = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+static constexpr D3D12_BARRIER_ACCESS kAccessUAV = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+static constexpr D3D12_BARRIER_LAYOUT kLayoutUAV = D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+static constexpr D3D12_RESOURCE_STATES kStateUAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+// Texture SRV read
+static constexpr D3D12_BARRIER_SYNC kSyncSRV = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+static constexpr D3D12_BARRIER_ACCESS kAccessSRV = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+static constexpr D3D12_BARRIER_LAYOUT kLayoutSRV = D3D12_BARRIER_LAYOUT_COMMON;
+static constexpr D3D12_RESOURCE_STATES kStateSRV = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
 /// @brief Manages a set of transition barriers and emits them to command lists.
 struct TransitionBarrierSet {
     TransitionBarrierSet(bool enhancedBarriers)
@@ -1487,6 +1499,11 @@ struct Direct3D12VDPRenderer::Impl {
 
         uint32 nextLayerRenderLine = 0;
         uint32 nextComposeLine = 0;
+
+        /// @brief Whether layer rendering has already applied the transition barriers.
+        /// Set when rendering layers, cleared when compositing layers.
+        /// TODO: replace with per-resource state tracking
+        bool doneLayerRenderTransitionBarriers = false;
 
         bool rotRegsDirty = false;
         bool layerRenderParamsDirty = false;
@@ -3326,6 +3343,9 @@ struct Direct3D12VDPRenderer::Impl {
 
         auto &cmdList = vdp2.cmdList;
 
+        const bool doTransitionBarriers = !vdp2.doneLayerRenderTransitionBarriers;
+        vdp2.doneLayerRenderTransitionBarriers = true;
+
         const bool deinterlace = enhancements.deinterlace && vdpState.regs2.TVMD.IsInterlaced();
         const uint32 yShift = deinterlace ? 1u : 0u;
 
@@ -3360,18 +3380,9 @@ struct Direct3D12VDPRenderer::Impl {
             TransitionBarrierSet barrier = MakeTransitionBarrierSet();
 
             // SRV read -> UAV write
-            static constexpr D3D12_BARRIER_SYNC kSyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-            static constexpr D3D12_BARRIER_ACCESS kAccessBefore = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-            static constexpr D3D12_BARRIER_LAYOUT kLayoutBefore = D3D12_BARRIER_LAYOUT_COMMON;
-            static constexpr D3D12_RESOURCE_STATES kStateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            barrier.AddTexture(vdp2.spriteAttrsTexture.GetPointer(), false, kTexRangeAll, kSyncSRV, kSyncUAV,
+                               kAccessSRV, kAccessUAV, kLayoutSRV, kLayoutUAV, kStateSRV, kStateUAV);
 
-            static constexpr D3D12_BARRIER_SYNC kSyncAfter = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-            static constexpr D3D12_BARRIER_ACCESS kAccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-            static constexpr D3D12_BARRIER_LAYOUT kLayoutAfter = D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
-            static constexpr D3D12_RESOURCE_STATES kStateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-
-            barrier.AddTexture(vdp2.spriteAttrsTexture.GetPointer(), false, kTexRangeAll, kSyncBefore, kSyncAfter,
-                               kAccessBefore, kAccessAfter, kLayoutBefore, kLayoutAfter, kStateBefore, kStateAfter);
             barrier.Emit(vdp2.cmdList);
         }
         cmdList->SetPipelineState(vdp2.drawSpritePSO.GetPointer());
@@ -3386,18 +3397,15 @@ struct Direct3D12VDPRenderer::Impl {
             TransitionBarrierSet barrier = MakeTransitionBarrierSet();
 
             // UAV write -> SRV read
-            static constexpr D3D12_BARRIER_SYNC kSyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-            static constexpr D3D12_BARRIER_ACCESS kAccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-            static constexpr D3D12_BARRIER_LAYOUT kLayoutBefore = D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
-            static constexpr D3D12_RESOURCE_STATES kStateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barrier.AddTexture(vdp2.spriteAttrsTexture.GetPointer(), false, kTexRangeAll, kSyncUAV, kSyncSRV,
+                               kAccessUAV, kAccessSRV, kLayoutUAV, kLayoutSRV, kStateUAV, kStateSRV);
 
-            static constexpr D3D12_BARRIER_SYNC kSyncAfter = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-            static constexpr D3D12_BARRIER_ACCESS kAccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-            static constexpr D3D12_BARRIER_LAYOUT kLayoutAfter = D3D12_BARRIER_LAYOUT_COMMON;
-            static constexpr D3D12_RESOURCE_STATES kStateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            if (doTransitionBarriers) {
+                // SRV read -> UAV write
+                barrier.AddTexture(vdp2.colorCalcWindowTexture.GetPointer(), false, kTexRangeAll, kSyncSRV, kSyncUAV,
+                                   kAccessSRV, kAccessUAV, kLayoutSRV, kLayoutUAV, kStateSRV, kStateUAV);
+            }
 
-            barrier.AddTexture(vdp2.spriteAttrsTexture.GetPointer(), false, kTexRangeAll, kSyncBefore, kSyncAfter,
-                               kAccessBefore, kAccessAfter, kLayoutBefore, kLayoutAfter, kStateBefore, kStateAfter);
             barrier.Emit(vdp2.cmdList);
         }
         cmdList->SetPipelineState(vdp2.drawCCWindowPSO.GetPointer());
@@ -3408,15 +3416,27 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->Dispatch(HRes / 32, numLines, 1);
 
         // Draw NBGs and RBGs
-        if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
+        {
             TransitionBarrierSet barrier = MakeTransitionBarrierSet();
 
-            // UAV write -> SRV read
-            barrier.AddBuffer(vdp2.rotParamStatesBuffer.GetPointer(),                                               //
-                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COMPUTE_SHADING,               //
-                              D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,          //
-                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE //
-            );
+            if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
+                // UAV write -> SRV read
+                barrier.AddBuffer(vdp2.rotParamStatesBuffer.GetPointer(),                                      //
+                                  D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COMPUTE_SHADING,      //
+                                  D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, //
+                                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE //
+                );
+            }
+
+            if (doTransitionBarriers) {
+                // SRV read -> UAV write
+                barrier.AddTexture(vdp2.layerOutTexture.GetPointer(), false, kTexRangeAll, kSyncSRV, kSyncUAV,
+                                   kAccessSRV, kAccessUAV, kLayoutSRV, kLayoutUAV, kStateSRV, kStateUAV);
+                barrier.AddTexture(vdp2.rbgLineColorOutTexture.GetPointer(), false, kTexRangeAll, kSyncSRV, kSyncUAV,
+                                   kAccessSRV, kAccessUAV, kLayoutSRV, kLayoutUAV, kStateSRV, kStateUAV);
+            }
+
             barrier.Emit(vdp2.cmdList);
         }
         cmdList->SetPipelineState(vdp2.drawBGsPSO.GetPointer());
@@ -3438,12 +3458,21 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.cpuCommonRenderParams.startY = vdp2.nextComposeLine;
         VDP2UploadLineColorBackScreens();
 
-        // TODO: shouldn't we need barriers here? Specifically:
-        // - layerOutTexture: UAV->SRV
-        // - rbgLineColorOutTexture: UAV->SRV
-        // - colorCalcWindowTexture: UAV->SRV
-        // should reverse them afterwards
-        // NOTE: this function is *always* preceded by at least one VDP2RenderLayerLines call
+        // NOTE: this function is *always* preceded by at least one VDP2RenderLayerLines call.
+        // All states can be assumed to be relative to the end of that invocation.
+        TransitionBarrierSet barrier = MakeTransitionBarrierSet();
+
+        // UAV write -> SRV read
+        barrier.AddTexture(vdp2.layerOutTexture.GetPointer(), false, kTexRangeAll, kSyncUAV, kSyncSRV, kAccessUAV,
+                           kAccessSRV, kLayoutUAV, kLayoutSRV, kStateUAV, kStateSRV);
+        barrier.AddTexture(vdp2.rbgLineColorOutTexture.GetPointer(), false, kTexRangeAll, kSyncUAV, kSyncSRV,
+                           kAccessUAV, kAccessSRV, kLayoutUAV, kLayoutSRV, kStateUAV, kStateSRV);
+        barrier.AddTexture(vdp2.colorCalcWindowTexture.GetPointer(), false, kTexRangeAll, kSyncUAV, kSyncSRV,
+                           kAccessUAV, kAccessSRV, kLayoutUAV, kLayoutSRV, kStateUAV, kStateSRV);
+
+        barrier.Emit(cmdList);
+
+        vdp2.doneLayerRenderTransitionBarriers = false;
 
         // Determine how many lines to draw and update next scanline counter
         const uint32 numLines = y - vdp2.nextComposeLine + 1;
