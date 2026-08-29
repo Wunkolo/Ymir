@@ -12,7 +12,7 @@ cbuffer CommonRenderParams : register(b0) {
 
 StructuredBuffer<ComposeParams> composeParams : register(t1);
 Texture2DArray<uint4> layerIn : register(t2);
-StructuredBuffer<uint4> lnclBackIn : register(t3);
+Buffer<uint4> lnclBackIn : register(t3);
 Texture2DArray<uint4> rbgLineColorIn : register(t4);
 Texture2DArray<uint> spriteAttrsIn : register(t5);
 Texture2D<uint4> colorCalcWindowIn : register(t6);

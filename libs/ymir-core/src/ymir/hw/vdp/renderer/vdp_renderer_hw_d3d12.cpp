@@ -2553,10 +2553,11 @@ struct Direct3D12VDPRenderer::Impl {
             return {};
         }
 
+        ID3D12Resource *dstResource = vdp2.vramBuffer.GetPointer();
         ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
 
         TransitionBarrierSet barrier{features.enhancedBarriers};
-        barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
+        barrier.AddBuffer(dstResource, kVDP2VRAMSize,                                  //
                           D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
                           D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -2577,8 +2578,7 @@ struct Direct3D12VDPRenderer::Impl {
 
             // Upload VRAM chunk
             memcpy(alloc.data, &vdpState.mem2.VRAM[vramOffset], size);
-            vdp2.cmdList->CopyBufferRegion(vdp2.vramBuffer.GetPointer(), vramOffset, uploadBufferPtr, alloc.offset,
-                                           size);
+            vdp2.cmdList->CopyBufferRegion(dstResource, vramOffset, uploadBufferPtr, alloc.offset, size);
         }
         vdp2.vramDirty.ClearAll();
 
@@ -2594,14 +2594,8 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.cramDirty = false;
 
         ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
-        UploadAllocation alloc{};
 
-        TransitionBarrierSet barrier{features.enhancedBarriers};
-        barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
-                          D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
-                          D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
-                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-        barrier.Emit(vdp2.cmdList);
+        UploadAllocation alloc{};
 
         // Update color cache
         {
@@ -2613,7 +2607,17 @@ struct Direct3D12VDPRenderer::Impl {
             memcpy(alloc.data, vdp2.cpuCRAMColorCache.data(), size);
 
             ID3D12Resource *dstResource = vdp2.cramColorBuffer.GetPointer();
+
+            TransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.AddBuffer(dstResource, size,                                           //
+                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
             vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+            barrier.Reverse().Emit(vdp2.cmdList);
         }
 
         // Update rotation coefficients view
@@ -2628,10 +2632,18 @@ struct Direct3D12VDPRenderer::Impl {
             memcpy(alloc.data, &vdpState.mem2.CRAM[kVDP2CRAMSize / 2], size);
 
             ID3D12Resource *dstResource = vdp2.cramRotCoeffBuffer.GetPointer();
-            vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
-        }
 
-        barrier.Reverse().Emit(vdp2.cmdList);
+            TransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.AddBuffer(dstResource, size,                                           //
+                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
+            vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+            barrier.Reverse().Emit(vdp2.cmdList);
+        }
 
         return {};
     }
@@ -2877,17 +2889,10 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Update buffer
         {
+            ID3D12Resource *dstResource = vdp2.layerRenderParamsBuffer.GetPointer();
             ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
-            UploadAllocation alloc{};
-
-            TransitionBarrierSet barrier{features.enhancedBarriers};
-            barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
-                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
-                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
-                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-            barrier.Emit(vdp2.cmdList);
-
             const size_t size = sizeof(vdp2.cpuLayerRenderParams);
+            UploadAllocation alloc{};
             if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
                 return util::ErrorMessage{
                     fmt::format("Failed to allocate upload buffer for VDP2 layer rendering parameters: {}",
@@ -2895,7 +2900,13 @@ struct Direct3D12VDPRenderer::Impl {
             }
             memcpy(alloc.data, &vdp2.cpuLayerRenderParams, size);
 
-            ID3D12Resource *dstResource = vdp2.layerRenderParamsBuffer.GetPointer();
+            TransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.AddBuffer(dstResource, size,                                           //
+                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
             vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
 
             barrier.Reverse().Emit(vdp2.cmdList);
@@ -2946,24 +2957,24 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Update buffer
         {
+            ID3D12Resource *dstResource = vdp2.rotRegsBuffer.GetPointer();
             ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
-            UploadAllocation alloc{};
-
-            TransitionBarrierSet barrier{features.enhancedBarriers};
-            barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
-                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
-                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
-                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-            barrier.Emit(vdp2.cmdList);
-
             const size_t size = sizeof(vdp2.cpuRotRegs);
+
+            UploadAllocation alloc{};
             if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
                 return util::ErrorMessage{fmt::format(
                     "Failed to allocate upload buffer for VDP2 rotation registers: {}", result.Error().message)};
             }
             memcpy(alloc.data, &vdp2.cpuRotRegs, size);
 
-            ID3D12Resource *dstResource = vdp2.rotRegsBuffer.GetPointer();
+            TransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.AddBuffer(dstResource, size,                                           //
+                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
             vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
 
             barrier.Reverse().Emit(vdp2.cmdList);
@@ -3021,17 +3032,11 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Update buffer
         {
+            ID3D12Resource *dstResource = vdp2.composeParamsBuffer.GetPointer();
             ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
-            UploadAllocation alloc{};
-
-            TransitionBarrierSet barrier{features.enhancedBarriers};
-            barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
-                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
-                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
-                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-            barrier.Emit(vdp2.cmdList);
-
             const size_t size = sizeof(vdp2.cpuComposeParams);
+
+            UploadAllocation alloc{};
             if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
                 return util::ErrorMessage{
                     fmt::format("Failed to allocate upload buffer for VDP2 layer compositing parameters: {}",
@@ -3039,7 +3044,13 @@ struct Direct3D12VDPRenderer::Impl {
             }
             memcpy(alloc.data, &vdp2.cpuComposeParams, size);
 
-            ID3D12Resource *dstResource = vdp2.composeParamsBuffer.GetPointer();
+            TransitionBarrierSet barrier{features.enhancedBarriers};
+            barrier.AddBuffer(dstResource, size,                                           //
+                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                              D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            barrier.Emit(vdp2.cmdList);
+
             vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
 
             barrier.Reverse().Emit(vdp2.cmdList);
@@ -3107,24 +3118,24 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     util::VoidResult<> VDP2UploadLineColorBackScreens() {
+        ID3D12Resource *dstResource = vdp2.lnclBackBuffer.GetPointer();
         ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
-        UploadAllocation alloc{};
-
-        TransitionBarrierSet barrier{features.enhancedBarriers};
-        barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
-                          D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
-                          D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
-                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-        barrier.Emit(vdp2.cmdList);
-
         const size_t size = sizeof(vdp2.cpuLnclBack);
+
+        UploadAllocation alloc{};
         if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
             return util::ErrorMessage{
                 fmt::format("Failed to allocate upload buffer for VDP2 LNCL/BACK screens: {}", result.Error().message)};
         }
         memcpy(alloc.data, &vdp2.cpuLnclBack, size);
 
-        ID3D12Resource *dstResource = vdp2.lnclBackBuffer.GetPointer();
+        TransitionBarrierSet barrier{features.enhancedBarriers};
+        barrier.AddBuffer(dstResource, size,                                           //
+                          D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                          D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        barrier.Emit(vdp2.cmdList);
+
         vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
 
         barrier.Reverse().Emit(vdp2.cmdList);
@@ -3180,24 +3191,24 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     util::VoidResult<> VDP2UploadRotationParameterBases() {
+        ID3D12Resource *dstResource = vdp2.rotParamBasesBuffer.GetPointer();
         ID3D12Resource *uploadBufferPtr = vdp2.uploadBuffer.GetBufferResource().GetPointer();
-        UploadAllocation alloc{};
-
-        TransitionBarrierSet barrier{features.enhancedBarriers};
-        barrier.AddBuffer(uploadBufferPtr, vdp2.uploadBuffer.GetSize(),                //
-                          D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
-                          D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
-                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-        barrier.Emit(vdp2.cmdList);
-
         const size_t size = sizeof(vdp2.cpuRotParamBases);
+
+        UploadAllocation alloc{};
         if (auto result = VDP2AllocateUploadBuffer(size, 4, alloc); !result) {
             return util::ErrorMessage{fmt::format(
                 "Failed to allocate upload buffer for VDP2 rotation parameter bases: {}", result.Error().message)};
         }
         memcpy(alloc.data, &vdp2.cpuRotParamBases, size);
 
-        ID3D12Resource *dstResource = vdp2.rotParamBasesBuffer.GetPointer();
+        TransitionBarrierSet barrier{features.enhancedBarriers};
+        barrier.AddBuffer(dstResource, size,                                           //
+                          D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COPY, //
+                          D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST, //
+                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        barrier.Emit(vdp2.cmdList);
+
         vdp2.cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
 
         barrier.Reverse().Emit(vdp2.cmdList);
