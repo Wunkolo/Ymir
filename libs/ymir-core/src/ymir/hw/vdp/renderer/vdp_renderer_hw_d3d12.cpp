@@ -790,14 +790,15 @@ struct Direct3D12VDPRenderer::Impl {
     //
     // TODO
 
-    struct VDP1FrameContext : public FrameContext {};
-
     struct VDP1Resources {
         /// @brief VDP1 per-frame resources.
-        FrameSet<kNumFrames, VDP1FrameContext> frames;
+        FrameSet<kNumFrames> frames;
 
         /// @brief VDP1 command list.
         D3D12GraphicsCommandList cmdList;
+
+        /// @brief Upload ring buffer.
+        UploadRingBuffer uploadBuffer;
     } vdp1;
 
     // =================================================================================================================
@@ -1367,8 +1368,6 @@ struct Direct3D12VDPRenderer::Impl {
     /// The second half of CRAM can be used for that purpose.
     static constexpr UINT kVDP2CRAMRotCoeffBufferSize = kVDP2CRAMSize / 2;
 
-    struct VDP2FrameContext : public FrameContext {};
-
     struct VDP2Resources {
         VDP2Resources(const config::VDP2AccessPatternsConfig &accessPatternsConfig,
                       const config::VDP2DebugRender &debugRenderOptions)
@@ -1376,7 +1375,7 @@ struct Direct3D12VDPRenderer::Impl {
             , debugRenderOptions(debugRenderOptions) {}
 
         /// @brief VDP2 per-frame resources.
-        FrameSet<kNumFrames, VDP2FrameContext> frames;
+        FrameSet<kNumFrames> frames;
 
         /// @brief VDP2 command list.
         D3D12GraphicsCommandList cmdList;
@@ -1641,11 +1640,21 @@ struct Direct3D12VDPRenderer::Impl {
         }
         vdp1.cmdList->SetName(L"[Ymir-VDP1] Command list");
 
+        // Generic VDP1 upload buffer
+        {
+            if (auto result = vdp1.uploadBuffer.Create(device, kUploadBufferSize); !result) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create VDP1 upload buffer: {}", result.Error().message)};
+            }
+            vdp1.uploadBuffer.SetDebugName("VDP1");
+            vdp1.uploadBuffer.GetBufferResource()->SetName(L"[Ymir-VDP1] Upload buffer");
+        }
+
         // -------------------------------------------------------------------------------------------------------------
 
         // VDP2 command allocators and list
         for (int i = 0; i < vdp2.frames.Count(); ++i) {
-            VDP2FrameContext &frame = vdp2.frames[i];
+            FrameContext &frame = vdp2.frames[i];
             if (HRESULT hr = frame.cmdAlloc.Create(device, D3D12_COMMAND_LIST_TYPE_COMPUTE); FAILED(hr)) {
                 return util::ErrorMessage{fmt::format(
                     "Could not create VDP2 renderer command allocator #{}, error code {:X}", i, (uint32)hr)};
@@ -3615,12 +3624,12 @@ struct Direct3D12VDPRenderer::Impl {
         cmdQueue->ExecuteCommandLists(1, cmdList.GetAddressOfBase());
 
         // Advance frame
-        VDP2FrameContext &currFrame = vdp2.frames.GetCurrentFrame();
+        FrameContext &currFrame = vdp2.frames.GetCurrentFrame();
         vdp2.uploadBuffer.EndFrame(vdp2.frames.currFenceValue + 1);
         vdp2.frames.MoveToNextFrame(fence, cmdQueue);
 
         // Setup command list
-        VDP2FrameContext &nextFrame = vdp2.frames.GetCurrentFrame();
+        FrameContext &nextFrame = vdp2.frames.GetCurrentFrame();
         ID3D12DescriptorHeap *heaps[] = {resourceHeap.GetPointer()};
         cmdList->Reset(nextFrame.cmdAlloc.GetPointer(), nullptr);
         cmdList->SetDescriptorHeaps(std::size(heaps), heaps);
