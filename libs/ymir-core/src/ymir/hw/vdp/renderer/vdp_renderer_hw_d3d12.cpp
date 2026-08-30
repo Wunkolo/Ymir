@@ -2254,7 +2254,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Build shader, PSO and related resources for calculating rotparams
         {
-            auto shaderBlobResult = LoadShader("src/vdp/vdp2_calc_rotparams_cs.cso");
+            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_calc_rotparams.cso");
             if (!shaderBlobResult) {
                 return util::ErrorMessage{
                     fmt::format("Could not load VDP2 rotation parameters calculation compute shader: {}",
@@ -2310,7 +2310,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Build shader, PSO and related resources for drawing the sprite layer
         {
-            auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_sprite_cs.cso");
+            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_render_sprite.cso");
             if (!shaderBlobResult) {
                 return util::ErrorMessage{fmt::format("Could not load VDP2 sprite layer drawing compute shader: {}",
                                                       shaderBlobResult.Error().message)};
@@ -2366,7 +2366,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Build shader, PSO and related resources for drawing color calculation windows
         {
-            auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_ccwindow_cs.cso");
+            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_render_ccwindow.cso");
             if (!shaderBlobResult) {
                 return util::ErrorMessage{fmt::format("Could not load VDP2 color calculation window compute shader: {}",
                                                       shaderBlobResult.Error().message)};
@@ -2421,7 +2421,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Build shader, PSO and related resources for drawing layers
         {
-            auto shaderBlobResult = LoadShader("src/vdp/vdp2_render_bgs_cs.cso");
+            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_render_bgs.cso");
             if (!shaderBlobResult) {
                 return util::ErrorMessage{fmt::format("Could not load VDP2 layer rendering compute shader: {}",
                                                       shaderBlobResult.Error().message)};
@@ -2474,7 +2474,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Build shader, PSO and related resources for compositing layers
         {
-            auto shaderBlobResult = LoadShader("src/vdp/vdp2_compose_cs.cso");
+            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_compose.cso");
             if (!shaderBlobResult) {
                 return util::ErrorMessage{fmt::format("Could not load VDP2 layer compositing compute shader: {}",
                                                       shaderBlobResult.Error().message)};
