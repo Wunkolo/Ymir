@@ -20,6 +20,7 @@ Texture2DArray<uint> spriteAttrsIn : register(t6);
 
 RWTexture2DArray<uint4> layerOut : register(u0);
 RWTexture2DArray<uint4> rbgLineColorOut : register(u1);
+RWTexture2D<uint4> colorCalcWindowOut : register(u2);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -843,9 +844,24 @@ uint4 DrawRBG(uint2 pos, // pixel coordinates
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Color calculation window
+
+bool InsideColorCalcWindow(uint2 pos) {
+    LayerWindowParamsS ccWindows;
+    ccWindows.base.windowLogicAnd = BitTest(g_commonParams.windows, 5);
+    ccWindows.base.window0Enable = BitTest(g_commonParams.windows, 6);
+    ccWindows.base.window0Invert = BitTest(g_commonParams.windows, 7);
+    ccWindows.base.window1Enable = BitTest(g_commonParams.windows, 8);
+    ccWindows.base.window1Invert = BitTest(g_commonParams.windows, 9);
+    ccWindows.spriteWindowEnable = BitTest(g_commonParams.windows, 10);
+    ccWindows.spriteWindowInvert = BitTest(g_commonParams.windows, 11);
+    return InsideWindows(ccWindows, pos);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Entrypoint
 
-[numthreads(32, 1, 6)]
+[numthreads(32, 1, 7)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint3 outCoord = uint3(drawCoord.x, GetY(drawCoord.y, false), id.z);
@@ -853,5 +869,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         layerOut[outCoord] = DrawNBG(drawCoord, id.z);
     } else if (id.z <= 5) {
         layerOut[outCoord] = DrawRBG(drawCoord, id.z - 4);
+    } else if (id.z == 6) {
+        colorCalcWindowOut[outCoord.xy] = InsideColorCalcWindow(drawCoord);
     }
 }

@@ -1527,15 +1527,6 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief Descriptor range for drawing the sprite layer.
         DescriptorRange drawSpriteDescs;
 
-        /// @brief Compute shader for drawing the color calculation window.
-        gpu::ComputeShader drawCCWindowShader;
-        /// @brief Root signature for drawing the color calculation window.
-        D3D12RootSignature drawCCWindowRootSig;
-        /// @brief Pipeline state object for drawing the color calculation window.
-        D3D12PipelineState drawCCWindowPSO;
-        /// @brief Descriptor range for drawing the color calculation window.
-        DescriptorRange drawCCWindowDescs;
-
         /// @brief Compute shader for drawing background layers.
         gpu::ComputeShader drawBGsShader;
         /// @brief Root signature for drawing background layers.
@@ -2364,61 +2355,6 @@ struct Direct3D12VDPRenderer::Impl {
                                     std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
         }
 
-        // Build shader, PSO and related resources for drawing color calculation windows
-        {
-            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_render_ccwindow.cso");
-            if (!shaderBlobResult) {
-                return util::ErrorMessage{fmt::format("Could not load VDP2 color calculation window compute shader: {}",
-                                                      shaderBlobResult.Error().message)};
-            }
-            vdp2.drawCCWindowShader.format = gpu::ShaderBytecodeFormat::DXIL;
-            vdp2.drawCCWindowShader.bytecode = shaderBlobResult.Value();
-            vdp2.drawCCWindowShader.entrypoint = kCSEntrypoint;
-            auto result = gpu::ValidateShader(vdp2.drawCCWindowShader);
-            if (!result) {
-                return util::ErrorMessage{fmt::format(
-                    "VDP2 color calculation window compute shader validation failed: {}", result.Error().message)};
-            }
-
-            auto rootSigBuilder = vdp2.drawCCWindowRootSig.Builder();
-            rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
-            rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(3, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
-                .AddUAVs(1, 0);
-            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
-                return util::ErrorMessage{fmt::format(
-                    "Could not build VDP2 color calculation window root signature, error code {:X}", (uint32)hr)};
-            }
-            vdp2.drawCCWindowRootSig->SetName(L"[Ymir-VDP2] Color calculation window root signature");
-
-            const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-                .pRootSignature = vdp2.drawCCWindowRootSig.GetPointer(),
-                .CS = ToShaderBytecode(vdp2.drawCCWindowShader),
-            };
-            if (HRESULT hr = vdp2.drawCCWindowPSO.CreateCompute(device, psoDesc); FAILED(hr)) {
-                return util::ErrorMessage{
-                    fmt::format("Could not build VDP2 color calculation window pipeline state object, error code {:X}",
-                                (uint32)hr)};
-            }
-            vdp2.drawCCWindowPSO->SetName(L"[Ymir-VDP2] Color calculation window pipeline state object");
-
-            const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                vdp2.layerRenderParamsSRV.cpuHandle,
-                vdp2.vramSRV.cpuHandle,
-                vdp2.spriteAttrsSRV.cpuHandle,
-                vdp2.colorCalcWindowUAV.cpuHandle,
-            };
-            std::array<UINT, std::size(srcHandles)> srcSizes{};
-            srcSizes.fill(1);
-
-            if (!resourceHeapAlloc.Allocate(vdp2.drawCCWindowDescs, std::size(srcHandles))) {
-                return util::ErrorMessage{"Could not allocate VDP2 color calculation window descriptors"};
-            }
-
-            device->CopyDescriptors(1, &vdp2.drawCCWindowDescs.cpuHandle, &vdp2.drawCCWindowDescs.count,
-                                    std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
-        }
-
         // Build shader, PSO and related resources for drawing layers
         {
             auto shaderBlobResult = LoadShader("src/vdp/cs_vdp2_render_bgs.cso");
@@ -2439,7 +2375,7 @@ struct Direct3D12VDPRenderer::Impl {
             rootSigBuilder.Add32BitConstants(0, sizeof(VDP2CommonRenderParams) / sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
                 .AddSRVs(6, 1) // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
-                .AddUAVs(2, 0);
+                .AddUAVs(3, 0);
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{
                     fmt::format("Could not build VDP2 layer rendering root signature, error code {:X}", (uint32)hr)};
@@ -2457,9 +2393,15 @@ struct Direct3D12VDPRenderer::Impl {
             vdp2.drawBGsPSO->SetName(L"[Ymir-VDP2] Layer rendering pipeline state object");
 
             const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                vdp2.layerRenderParamsSRV.cpuHandle, vdp2.rotRegsSRV.cpuHandle,         vdp2.vramSRV.cpuHandle,
-                vdp2.cramColorSRV.cpuHandle,         vdp2.rotParamStatesSRV.cpuHandle,  vdp2.spriteAttrsSRV.cpuHandle,
-                vdp2.layerOutUAV.cpuHandle,          vdp2.rbgLineColorOutUAV.cpuHandle,
+                vdp2.layerRenderParamsSRV.cpuHandle,
+                vdp2.rotRegsSRV.cpuHandle,
+                vdp2.vramSRV.cpuHandle,
+                vdp2.cramColorSRV.cpuHandle,
+                vdp2.rotParamStatesSRV.cpuHandle,
+                vdp2.spriteAttrsSRV.cpuHandle,
+                vdp2.layerOutUAV.cpuHandle,
+                vdp2.rbgLineColorOutUAV.cpuHandle,
+                vdp2.colorCalcWindowUAV.cpuHandle,
             };
             std::array<UINT, std::size(srcHandles)> srcSizes{};
             srcSizes.fill(1);
@@ -3502,34 +3444,23 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->SetComputeRootDescriptorTable(1, vdp2.drawSpriteDescs.gpuHandle);
         cmdList->Dispatch((HRes + 31) / 32, numLines, enhancements.transparentMeshes ? 2 : 1);
 
-        // Transition resources for drawing the color calculation window
-        vdp2.barrierTracker.TransitionTexture(
-            vdp2.spriteAttrsTexture.GetPointer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-            D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_COMMON);
-        vdp2.barrierTracker.TransitionTexture(vdp2.colorCalcWindowTexture.GetPointer(),
-                                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-                                              D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
-                                              D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
-        vdp2.barrierTracker.Flush(cmdList);
-
-        // Draw color calculation window
-        cmdList->SetPipelineState(vdp2.drawCCWindowPSO.GetPointer());
-        cmdList->SetComputeRootSignature(vdp2.drawCCWindowRootSig.GetPointer());
-        cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp2.cpuCommonRenderParams) / sizeof(uint32),
-                                              &vdp2.cpuCommonRenderParams, 0);
-        cmdList->SetComputeRootDescriptorTable(1, vdp2.drawCCWindowDescs.gpuHandle);
-        cmdList->Dispatch(HRes / 32, numLines, 1);
-
         // Transition resources for drawing background layers
         if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
             vdp2.barrierTracker.TransitionBuffer(
                 vdp2.rotParamStatesBuffer.GetPointer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
         }
+        vdp2.barrierTracker.TransitionTexture(
+            vdp2.spriteAttrsTexture.GetPointer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_COMMON);
         vdp2.barrierTracker.TransitionTexture(vdp2.layerOutTexture.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                               D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
                                               D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
         vdp2.barrierTracker.TransitionTexture(vdp2.rbgLineColorOutTexture.GetPointer(),
+                                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                              D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                                              D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
+        vdp2.barrierTracker.TransitionTexture(vdp2.colorCalcWindowTexture.GetPointer(),
                                               D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
                                               D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
                                               D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
