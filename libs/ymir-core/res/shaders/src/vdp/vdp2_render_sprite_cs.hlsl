@@ -41,7 +41,6 @@ static const bool useSpriteWindow = BitTest(g_commonParams.spriteParams, 19);
 static const uint spriteDisplayFB = BitExtract(g_commonParams.spriteParams, 22, 1);
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
-static const bool transparentMeshes = BitTest(g_commonParams.enhancements, 1);
 
 static const uint colorRAMMode = BitExtract(g_commonParams.displayParams, 6, 2);
 static const uint kCRAMAddressMask = colorRAMMode == 1 ? 0x7FF : 0x3FF;
@@ -470,7 +469,7 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Entrypoint
 
-[numthreads(32, 1, 2)]
+[numthreads(32, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint3 outCoord = uint3(drawCoord.x, GetY(drawCoord.y), id.z + 6);
