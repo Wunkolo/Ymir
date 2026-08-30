@@ -36,7 +36,6 @@ static const uint displayResH = kResolutionsH[hreso & 3u]; // 3rd bit intentiona
 static const uint displayResV = exclusiveMonitor ? 480 : kResolutionsV[vreso];
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
-static const bool transparentMeshes = BitTest(g_commonParams.enhancements, 1);
 
 static const uint colorRAMMode = BitExtract(g_commonParams.displayParams, 6, 2);
 static const uint kCRAMAddressMask = colorRAMMode == 1 ? 0x7FF : 0x3FF;

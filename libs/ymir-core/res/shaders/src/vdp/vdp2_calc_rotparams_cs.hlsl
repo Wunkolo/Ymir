@@ -17,7 +17,6 @@ ByteAddressBuffer cramCoeff : register(t4);
 
 RWStructuredBuffer<RotParamState> rotParamStatesOut : register(u1);
 
-
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
 
