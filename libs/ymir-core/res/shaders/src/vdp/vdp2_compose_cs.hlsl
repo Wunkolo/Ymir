@@ -12,7 +12,7 @@ cbuffer CommonRenderParams : register(b0) {
 
 StructuredBuffer<ComposeParams> composeParams : register(t1);
 Texture2DArray<uint4> layerIn : register(t2);
-Buffer<uint4> lnclBackIn : register(t3);
+Buffer<uint> lnclBackIn : register(t3);
 Texture2DArray<uint4> rbgLineColorIn : register(t4);
 Texture2DArray<uint> spriteAttrsIn : register(t5);
 Texture2D<uint4> colorCalcWindowIn : register(t6);
@@ -147,11 +147,19 @@ bool IsLineColorEnabled(uint layer, uint2 pos) {
     return BitTest(composeParams[0].lineColorEnable, layer);
 }
 
+uint3 Color888(uint val32) {
+    return uint3(
+        BitExtract(val32, 0u, 8u),
+        BitExtract(val32, 8u, 8u),
+        BitExtract(val32, 16u, 8u)
+    );
+}
+
 uint3 GetLineColor(uint layer, uint2 pos) {
     if (layer == kLayerRBG0 || (layer == kLayerNBG0_RBG1 && IsBGLayerEnabled(kBGLayerRBG1))) {
         return rbgLineColorIn[uint3(pos, layer - kLayerRBG0)].rgb;
     }
-    return lnclBackIn[GetLoResInputY(pos.y)].rgb;
+    return Color888(lnclBackIn[GetLoResInputY(pos.y)]);
 }
 
 int GetColorCalcRatio(uint layer, uint2 pos) {
@@ -228,7 +236,7 @@ uint3 Compose(uint2 basePos) {
         const bool borderColorMode = BitTest(g_commonParams.displayParams, 1);
         if (borderColorMode) {
             // Use back screen color
-            return lnclBackIn[kMaxResH + GetLoResInputY(basePos.y)].rgb;
+            return Color888(lnclBackIn[kMaxResH + GetLoResInputY(pos.y)]);
         }
         return uint3(0, 0, 0);
     }

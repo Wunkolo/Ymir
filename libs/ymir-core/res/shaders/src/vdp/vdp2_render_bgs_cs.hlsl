@@ -21,7 +21,6 @@ Texture2DArray<uint> spriteAttrsIn : register(t6);
 RWTexture2DArray<uint4> layerOut : register(u0);
 RWTexture2DArray<uint4> rbgLineColorOut : register(u1);
 
-
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
 
