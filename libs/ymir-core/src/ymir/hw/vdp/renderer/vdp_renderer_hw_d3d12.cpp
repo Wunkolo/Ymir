@@ -3373,6 +3373,20 @@ struct Direct3D12VDPRenderer::Impl {
             return;
         }
 
+        auto &cmdList = vdp2.cmdList;
+
+        const bool deinterlace = enhancements.deinterlace && vdpState.regs2.TVMD.IsInterlaced();
+        const uint32 yShift = deinterlace ? 1u : 0u;
+
+        const uint32 startY = vdp2.nextLayerRenderLine;
+
+        // Determine how many lines to draw and update next scanline counter
+        const uint32 baseNumLines = y - startY + 1;
+        const uint32 numLines = baseNumLines << yShift;
+        vdp2.nextLayerRenderLine = y + 1;
+
+        // ---------------------------------------------------------------------
+
         // Transition resources for rendering layers
         vdp2.barrierTracker.TransitionBuffer(vdp2.layerRenderParamsBuffer.GetPointer(),
                                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -3386,18 +3400,6 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.barrierTracker.TransitionBuffer(vdp2.cramColorBuffer.GetPointer(),
                                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
-
-        auto &cmdList = vdp2.cmdList;
-
-        const bool deinterlace = enhancements.deinterlace && vdpState.regs2.TVMD.IsInterlaced();
-        const uint32 yShift = deinterlace ? 1u : 0u;
-
-        const uint32 startY = vdp2.nextLayerRenderLine;
-
-        // Determine how many lines to draw and update next scanline counter
-        const uint32 baseNumLines = y - startY + 1;
-        const uint32 numLines = baseNumLines << yShift;
-        vdp2.nextLayerRenderLine = y + 1;
 
         // Compute rotation parameters if any RBGs are enabled
         if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
@@ -3429,6 +3431,8 @@ struct Direct3D12VDPRenderer::Impl {
 
         vdp2.cpuCommonRenderParams.startY = startY << yShift;
 
+        // ---------------------------------------------------------------------
+
         // Transition resources for drawing the sprite layer
         vdp2.barrierTracker.TransitionTexture(vdp2.spriteAttrsTexture.GetPointer(),
                                               D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
@@ -3443,6 +3447,8 @@ struct Direct3D12VDPRenderer::Impl {
                                               &vdp2.cpuCommonRenderParams, 0);
         cmdList->SetComputeRootDescriptorTable(1, vdp2.drawSpriteDescs.gpuHandle);
         cmdList->Dispatch((HRes + 31) / 32, numLines, enhancements.transparentMeshes ? 2 : 1);
+
+        // ---------------------------------------------------------------------
 
         // Transition resources for drawing background layers
         if (vdpState.regs2.bgEnabled[4] || vdpState.regs2.bgEnabled[5]) {
@@ -3486,6 +3492,12 @@ struct Direct3D12VDPRenderer::Impl {
         vdp2.cpuCommonRenderParams.startY = vdp2.nextComposeLine;
         VDP2UploadLineColorBackScreens();
 
+        // Determine how many lines to draw and update next scanline counter
+        const uint32 numLines = y - vdp2.nextComposeLine + 1;
+        vdp2.nextComposeLine = y + 1;
+
+        // ---------------------------------------------------------------------
+
         // Transition resources for compositing layers
         vdp2.barrierTracker.TransitionBuffer(vdp2.composeParamsBuffer.GetPointer(),
                                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -3503,10 +3515,6 @@ struct Direct3D12VDPRenderer::Impl {
                                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                              D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
         vdp2.barrierTracker.Flush(cmdList);
-
-        // Determine how many lines to draw and update next scanline counter
-        const uint32 numLines = y - vdp2.nextComposeLine + 1;
-        vdp2.nextComposeLine = y + 1;
 
         // Compose final image
         cmdList->SetPipelineState(vdp2.composePSO.GetPointer());
