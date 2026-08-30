@@ -207,14 +207,12 @@ uint4 GetLayerOutput(uint layer, uint2 pos) {
 struct Attributes {
     uint priority;
     bool specColorCalc;
-    bool transparent;
 };
 
 Attributes ToAttributes(uint pixelData) {
     Attributes attrs;
     attrs.priority = BitExtract(pixelData, 0, 3);
     attrs.specColorCalc = BitTest(pixelData, kPixelAttrBitSpecColorCalc);
-    attrs.transparent = BitTest(pixelData, kPixelAttrBitTransparent);
     return attrs;
 }
 
@@ -232,7 +230,7 @@ uint3 Compose(uint2 basePos) {
             // Use back screen color
             return lnclBackIn[kMaxResH + GetLoResInputY(basePos.y)].rgb;
         }
-        return kBlackPixel.rgb;
+        return uint3(0, 0, 0);
     }
 
     uint layerStack[3] = { kLayerBack, kLayerBack, kLayerBack };
@@ -247,12 +245,7 @@ uint3 Compose(uint2 basePos) {
         const uint4 layerOutput = GetLayerOutput(layer, pos);
         const Attributes attrs = ToAttributes(layerOutput.a);
 
-        // Skip transparent pixels
-        if (attrs.transparent) {
-            continue;
-        }
-
-        // Priority zero also means transparent pixel
+        // Priority zero means transparent pixel
         if (attrs.priority == 0) {
             continue;
         }
@@ -291,7 +284,7 @@ uint3 Compose(uint2 basePos) {
         meshPixel = meshOutput.rgb;
         const Attributes meshAttrs = ToAttributes(meshOutput.a);
         const uint meshSpriteAttrs = spriteAttrsIn[uint3(pos, 1)];
-        if (!meshAttrs.transparent && meshAttrs.priority > 0 && !BitTest(meshSpriteAttrs, kSpriteAttrBitNormalShadow)) {
+        if (meshAttrs.priority > 0 && !BitTest(meshSpriteAttrs, kSpriteAttrBitNormalShadow)) {
             for (uint i = 0; i < 3; i++) {
                 // The sprite layer has the highest priority on ties, so the priority check can be simplified.
                 // Sprite pixels drawn of top of mesh pixels erase the corresponding pixels from the mesh layer,

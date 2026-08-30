@@ -396,6 +396,10 @@ uint4 FetchPixel(const BaseBGParams params, uint baseAddress, uint2 dotPos, uint
         outSpecColorCalc = false;
     }
 
+    if (outTransparent) {
+        return kTransparentPixel;
+    }
+
     uint outPriority = bgPriorityNum;
     if (bgPriorityMode == kPriorityModeCharacter) {
         outPriority &= ~1;
@@ -409,7 +413,6 @@ uint4 FetchPixel(const BaseBGParams params, uint baseAddress, uint2 dotPos, uint
 
     return uint4(
         outColor.rgb,
-        (outTransparent << kPixelAttrBitTransparent) |
         (outSpecColorCalc << kPixelAttrBitSpecColorCalc) |
         outPriority
     );
