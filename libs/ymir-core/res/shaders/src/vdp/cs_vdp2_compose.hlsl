@@ -149,7 +149,7 @@ bool IsColorCalcEnabled(uint layer, uint2 pos) {
             return false;
         }
         const uint attrs = spriteAttrsIn[uint3(pos, 0)];
-        const uint priority = BitExtract(attrs, 0, 3);
+        const uint priority = BitExtract(layerAttrs, 0, 3);
         const uint value = BitExtract(g_commonParams.spriteParams, 11, 3);
         const uint cond = BitExtract(g_commonParams.spriteParams, 14, 2);
         switch (cond) {
