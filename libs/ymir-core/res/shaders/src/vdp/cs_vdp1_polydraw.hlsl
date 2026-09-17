@@ -8,9 +8,9 @@
 // Shader specialization macros:
 // - POLYSPEC_TRANSPARENT_MESH: 0=checkerboard mesh; 1=transparent mesh
 // - POLYSPEC_SHADING_MODE:
-//     0 = Replace and Half-Luminance (copy)
-//     1 = Shadow (shift)
-//     2 = Half-Transparency (OIT)
+//     0 = Copy (Replace, Half-Luminance)
+//     1 = Right-shift (Shadow)
+//     2 = OIT (Half-Transparency)
 //     3 = MSB
 //
 // Implementation notes:
@@ -494,8 +494,6 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     const PolySpan span = spanParams[spanIndex];
     const uint spanStep = id.x - spanPrefixSums[spanIndex] + span.skip;
-    const uint shadingMode = BitExtract(span.cmdpmod, 0, 2);
-    const bool gouraudEnable = BitTest(span.cmdpmod, 2);
     const bool meshEnable = BitTest(span.cmdpmod, 8);
     const bool cullMeshPixels = !POLYSPEC_TRANSPARENT_MESH && meshEnable;
     // TODO: POLYSPEC_TRANSPARENT_MESH should output to the mesh buffer
@@ -616,6 +614,9 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 #else // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     // =========================================================================
     // Non-MSB: Replace, Half-Luminance or Half-Transparency
+
+    const uint shadingMode = BitExtract(span.cmdpmod, 0, 2);
+    const bool gouraudEnable = BitTest(span.cmdpmod, 2);
 
     // Modify source color depending on the mode
     if (!pixel8Bits && (gouraudEnable || shadingMode == kColorBlendModeHalfLuminance)) {

@@ -6,7 +6,10 @@
 
 // Shader specialization macros:
 // - POLYSPEC_TRANSPARENT_MESH: 0=checkerboard mesh; 1=transparent mesh
-// - POLYSPEC_MERGE_MODE: 0=copy (Replace, Half-Luminance); 1=right-shift (Shadow); 2=OIT (Half-Transparency)
+// - POLYSPEC_MERGE_MODE:
+//     0 = Copy (Replace, Half-Luminance)
+//     1 = Right-shift (Shadow)
+//     2 = OIT (Half-Transparency)
 //
 // Implementation notes:
 // - Works on 32-bit units at a time
@@ -14,7 +17,7 @@
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
 #define POLYSPEC_TRANSPARENT_MESH 0
-#define POLYSPEC_MERGE_MODE       1
+#define POLYSPEC_MERGE_MODE       2
 #endif
 
 cbuffer RenderParamsBuffer : register(b0) {
