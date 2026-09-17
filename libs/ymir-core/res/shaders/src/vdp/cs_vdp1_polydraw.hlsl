@@ -6,19 +6,19 @@
 #include "util/data_ops.hlsli"
 
 // Shader specialization macros:
-// - POLYSPEC_TEXTURED: 0=solid color; 1=textured
 // - POLYSPEC_TRANSPARENT_MESH: 0=checkerboard mesh; 1=transparent mesh
-// - POLYSPEC_MODE_MSB         [CMDPMOD.15]: 0=normal; 1=MSB (overrides shading options)
-// - POLYSPEC_SHADING_GOURAUD  [CMDPMOD..2]: 0=flat shading; 1=gouraud shading
-// - POLYSPEC_SHADING_HALF_SRC [CMDPMOD..1]: 0=don't modify source color; 1=halve source color ("half-luminance")
-// - POLYSPEC_SHADING_HALF_DST [CMDPMOD..0]: 0=don't modify destination color; 1=halve destination color ("shadow")
+// - POLYSPEC_SHADING_MODE:
+//     0 = Replace and Half-Luminance (copy)
+//     1 = Shadow (shift)
+//     2 = Half-Transparency (OIT)
+//     3 = MSB
 //
 // Implementation notes:
-// - POLYSPEC_SHADING_HALF_DST and POLYSPEC_SHADING_HALF_SRC specify the blending mode:
-//    DST=0 SRC=0  Replace            dst = src
-//    DST=0 SRC=1  Half-Luminance     dst = src >> 1
-//    DST=1 SRC=0  Shadow             if (dst.msb) { dst = dst >> 1 }
-//    DST=1 SRC=1  Half-Transparency  if (dst.msb) { dst = (dst + src) >> 1 } else { dst = src }
+// - Shading modes derived from CMDPMOD bits 0..1:
+//    00 (0)  Replace            dst = src
+//    01 (1)  Shadow             if (dst.msb) { dst = dst >> 1 }
+//    10 (2)  Half-Luminance     dst = src >> 1
+//    11 (3)  Half-Transparency  if (dst.msb) { dst = (dst + src) >> 1 } else { dst = src }
 // - Inputs:
 //   - Span parameters list
 //   - Precomputed span length and prefix sums for pixel indexing
@@ -41,14 +41,15 @@
 // - The output merger shader applies the output of this shader to the output FBRAM in 32-bit units (2 or 4 pixels at a time)
 //   - Skipped for MSB (unless using a dedicated buffer)
 
+#define POLYSPEC_SHADING_MODE_COPY  0
+#define POLYSPEC_SHADING_MODE_SHIFT 1
+#define POLYSPEC_SHADING_MODE_OIT   2
+#define POLYSPEC_SHADING_MODE_MSB   3
+
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
-#define POLYSPEC_TEXTURED         1
 #define POLYSPEC_TRANSPARENT_MESH 0
-#define POLYSPEC_MODE_MSB         0
-#define POLYSPEC_SHADING_GOURAUD  1
-#define POLYSPEC_SHADING_HALF_SRC 1
-#define POLYSPEC_SHADING_HALF_DST 0
+#define POLYSPEC_SHADING_MODE     POLYSPEC_SHADING_MODE_COPY
 #endif
 
 cbuffer RenderParamsBuffer : register(b0) {
@@ -60,7 +61,7 @@ StructuredBuffer<PolySpan> spanParams : register(t1);
 Buffer<uint> spanPrefixSums : register(t2);
 ByteAddressBuffer vram : register(t3);
 
-#if POLYSPEC_MODE_MSB
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
 RWByteAddressBuffer fbramOut : register(u1);
 #else
 RWBuffer<uint> internalSpriteOut : register(u1);
@@ -493,6 +494,8 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     const PolySpan span = spanParams[spanIndex];
     const uint spanStep = id.x - spanPrefixSums[spanIndex] + span.skip;
+    const uint shadingMode = BitExtract(span.cmdpmod, 0, 2);
+    const bool gouraudEnable = BitTest(span.cmdpmod, 2);
     const bool meshEnable = BitTest(span.cmdpmod, 8);
     const bool cullMeshPixels = !POLYSPEC_TRANSPARENT_MESH && meshEnable;
     // TODO: POLYSPEC_TRANSPARENT_MESH should output to the mesh buffer
@@ -503,11 +506,10 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     lineStepper.SetStep(spanStep);
 
     uint spriteData;
-#if POLYSPEC_TEXTURED
-    // -------------------------------------------------------------------------
-    // Textured polygon
+    if (span.textured) {
+        // ---------------------------------------------------------------------
+        // Textured polygon
 
-    {
         TextureStepper uStepper;
         const uint charSizeH = max(BitExtract(span.cmdsize, 8, 6) << 3, 1);
         const bool flipH = span.flipH;
@@ -551,18 +553,17 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             // Transparent pixel
             return;
         }
-    }
-#else
-    // -------------------------------------------------------------------------
-    // Solid color polygon
+    } else {
+        // -------------------------------------------------------------------------
+        // Solid color polygon
 
-    spriteData = span.cmdcolr;
-    if (pixel8Bits) {
-        spriteData &= 0xFFu;
+        spriteData = span.cmdcolr;
+        if (pixel8Bits) {
+            spriteData &= 0xFFu;
+        }
     }
-#endif
 
-#if POLYSPEC_MODE_MSB
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
     // =========================================================================
     // MSB
 
@@ -592,7 +593,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         }
     }
 
-#elif !POLYSPEC_SHADING_HALF_SRC && POLYSPEC_SHADING_HALF_DST
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_SHIFT
     // =========================================================================
     // Non-MSB: Shadow
 
@@ -612,38 +613,36 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         }
     }
 
-#else
+#else // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     // =========================================================================
     // Non-MSB: Replace, Half-Luminance or Half-Transparency
 
     // Modify source color depending on the mode
-#if POLYSPEC_SHADING_GOURAUD || (!POLYSPEC_SHADING_HALF_DST && POLYSPEC_SHADING_HALF_SRC)
-    if (!pixel8Bits) {
+    if (!pixel8Bits && (gouraudEnable || shadingMode == kColorBlendModeHalfLuminance)) {
         uint4 srcColor = Uint16ToColor555(spriteData);
 
-#if POLYSPEC_SHADING_GOURAUD
-        // Apply gouraud shading
-        GouraudStepper gouraud;
-        gouraud.Setup(lineStepper.Length() + 1, span.gouraud0, span.gouraud1);
-        gouraud.Skip(spanStep);
-        srcColor = gouraud.Blend(srcColor);
-#endif
+        if (gouraudEnable) {
+            // Apply gouraud shading
+            GouraudStepper gouraud;
+            gouraud.Setup(lineStepper.Length() + 1, span.gouraud0, span.gouraud1);
+            gouraud.Skip(spanStep);
+            srcColor = gouraud.Blend(srcColor);
+        }
 
-#if !POLYSPEC_SHADING_HALF_DST && POLYSPEC_SHADING_HALF_SRC
-        // Apply half-luminance
-        srcColor.r >>= 1u;
-        srcColor.g >>= 1u;
-        srcColor.b >>= 1u;
-#endif
+        if (shadingMode == kColorBlendModeHalfLuminance) {
+            // Apply half-luminance
+            srcColor.r >>= 1u;
+            srcColor.g >>= 1u;
+            srcColor.b >>= 1u;
+        }
 
         spriteData = Color555ToUint16(srcColor);
     }
-#endif // POLYSPEC_SHADING_GOURAUD || (!POLYSPEC_SHADING_HALF_DST && POLYSPEC_SHADING_HALF_SRC)
 
     const uint value = spriteData | ((spanIndex + 1u) << 16u);
 
     // Output pixel depending on the mode
-#if POLYSPEC_SHADING_HALF_SRC && POLYSPEC_SHADING_HALF_DST
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     // -------------------------------------------------------------------------
     // Half-Transparency
 
@@ -652,7 +651,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     // - Linked List
     // - Loop32
     // - Spinlock
-#else
+#else // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY
     // -------------------------------------------------------------------------
     // Replace or Half-Luminance
 
@@ -671,7 +670,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             InterlockedMax(internalSpriteOut[aaOutOffset], value);
         }
     }
-#endif // POLYSPEC_SHADING_HALF_SRC && POLYSPEC_SHADING_HALF_DST
+#endif // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
 
-#endif // POLYSPEC_MODE_MSB
+#endif // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
 }

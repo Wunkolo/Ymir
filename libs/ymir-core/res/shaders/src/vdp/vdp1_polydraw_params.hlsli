@@ -24,6 +24,7 @@ struct PolySpan {
     uint cmdsize;
     uint charAddr;
 
+    bool textured;
     uint texV;
     bool flipH;
     uint endCodeIndex;

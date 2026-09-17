@@ -4,4 +4,10 @@
 // Size of a single VDP1 framebuffer
 static const uint kVDP1FBRAMSize = 256 * 1024;
 
+// CMDPMOD bits 0..1
+static const uint kColorBlendModeReplace = 0;
+static const uint kColorBlendModeShadow = 1;
+static const uint kColorBlendModeHalfLuminance = 2;
+static const uint kColorBlendModeHalfTransparency = 3;
+
 #endif

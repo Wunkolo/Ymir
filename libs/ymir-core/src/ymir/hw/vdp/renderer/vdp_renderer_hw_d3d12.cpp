@@ -18,6 +18,7 @@
 #include <ymir/util/dev_log.hpp>
 #include <ymir/util/dirty_bitmap.hpp>
 #include <ymir/util/scope_guard.hpp>
+#include <ymir/util/string.hpp>
 
 #include <d3d12.h>
 
@@ -884,16 +885,17 @@ struct Direct3D12VDPRenderer::Impl {
         HLSLuint charAddr; // CMDSRCA value * 8 (textured only)
 
         // Textured only parameters
+        HLSLbool textured;     // Textured polygon
         HLSLuint texV;         // Texture V coordinate
         HLSLbool flipH;        // Horizontal flip
         HLSLuint endCodeIndex; // U coordinate of the second end code
     };
 
     /// @brief Maximum number of spans to send per batch.
-    static constexpr uint32 kMaxVDP1Spans = 1024;
+    static constexpr uint32 kMaxVDP1Spans = 65535;
 
     /// @brief Maximum number of pixels per dispatch.
-    static constexpr uint32 kMaxVDP1PixelsPerDispatch = 1048576;
+    static constexpr uint32 kMaxVDP1PixelsPerDispatch = 4194240;
 
     // The polygon drawing shader uses the span index as a sequence number to enable parallel drawing.
     // This sequence has to fit in the top 16 bits of the output value, limiting the number of span drawn per
@@ -966,17 +968,15 @@ struct Direct3D12VDPRenderer::Impl {
         // - System and user clipping areas
         // - CMDPMOD, CMDCOLR, CMDSRCA and CMDSIZE values
         // - Shader specializations:
-        //   - Solid color vs. textured
         //   - Checkerboard vs. transparent meshes
-        //   - MSB mode (bit 15 of CMDPMOD), or shading modes (bits 0-2 of CMDPMOD):
-        //     - Gouraud shading
-        //     - Half-source
-        //     - Half-destination
+        //   - Color blending mode:
+        //     - Copy: Replace and Half-Luminance modes
+        //     - Right shift: Shadow mode
+        //     - OIT: Half-Transparency mode
+        //     - MSB: MSB mode
 
-        /// @brief Compute shaders for drawing polygons (non-MSB variants).
-        std::array<gpu::ComputeShader, 2 * 2 * 8> polyDrawShaders;
-        /// @brief Compute shaders for drawing polygons (MSB variants).
-        std::array<gpu::ComputeShader, 2 * 2> polyDrawMSBShaders;
+        /// @brief Compute shaders for drawing polygons.
+        std::array<gpu::ComputeShader, 2 * 4> polyDrawShaders;
         /// @brief Root signature for drawing polygons.
         /// Applies to all variants of the polygon drawing shader.
         D3D12RootSignature polyDrawRootSig;
@@ -1003,26 +1003,53 @@ struct Direct3D12VDPRenderer::Impl {
         size_t currPolyDrawShaderIndex = -1;
         // Currently active output merger shader
         size_t currOutputMergerShaderIndex = -1;
-        // Whether the currently active polygon drawing shader is an MSB or non-MSB variant
-        bool currPolyDrawShaderMSB = false;
     } vdp1;
 
     /// @brief Constructs a polygon drawing shader index from its variant options.
-    /// @param[in] textured use textures
     /// @param[in] mode polygon drawing mode
     /// @return the shader index
-    size_t MakeVDP1PolyDrawShaderIndex(bool textured, VDP1Command::DrawMode mode) const {
+    size_t MakeVDP1PolyDrawShaderIndex(VDP1Command::DrawMode mode) const {
         size_t value = 0;
+        bit::deposit_into<0>(value, enhancements.transparentMeshes);
         if (mode.msbOn) {
-            bit::deposit_into<1>(value, enhancements.transparentMeshes);
-            bit::deposit_into<0>(value, textured);
-        } else {
-            bit::deposit_into<4>(value, enhancements.transparentMeshes);
-            bit::deposit_into<3>(value, textured);
-            bit::deposit_into<2>(value, mode.gouraudEnable);
-            bit::deposit_into<0, 1>(value, mode.colorCalcBits);
+            // MSB -> mode 3 (MSB)
+            bit::deposit_into<1, 2>(value, 3);
+        } else if (mode.colorCalcBits == 3) {
+            // Half-Transparency -> mode 2 (OIT)
+            bit::deposit_into<1, 2>(value, 2);
+        } else if (mode.colorCalcBits == 1) {
+            // Shadow -> mode 1 (Shift)
+            bit::deposit_into<1, 2>(value, 1);
         }
+        // Other modes -> mode 0 (Copy)
         return value;
+    }
+
+    struct PolyDrawShaderIndex {
+        size_t meshMode;
+        size_t shadingMode;
+    };
+
+    /// @brief Expands a bit-packed VDP1 polygon drawing shader index into its components.
+    /// @param[in] index the shader index
+    /// @return the index's components
+    PolyDrawShaderIndex ExpandVDP1PolyDrawShaderIndex(size_t index) {
+        return {
+            .meshMode = bit::extract<0>(index),
+            .shadingMode = bit::extract<1, 2>(index),
+        };
+    }
+
+    /// @brief Determines if the given polygon drawing shader variant uses MSB shading mode.
+    /// @param[in] index the shader index
+    /// @return `true` if the shader uses MSB shading mode, `false` otherwise
+    bool IsVDP1PolyDrawShaderMSB(size_t index) {
+        return bit::extract<1, 2>(index) == 3;
+    }
+
+    std::string GetVDP1PolyDrawShaderVariantName(size_t index) {
+        const PolyDrawShaderIndex components = ExpandVDP1PolyDrawShaderIndex(index);
+        return fmt::format("Ms{}-Sh{}", components.meshMode, components.shadingMode);
     }
 
     /// @brief Constructs an output merger shader index from its variant options.
@@ -1043,40 +1070,24 @@ struct Direct3D12VDPRenderer::Impl {
         return value;
     }
 
-    struct PolyDrawShaderIndex {
-        size_t transparentMesh;
-        size_t textured;
-        size_t gouraud;
-        size_t halfSrc;
-        size_t halfDst;
+    struct OutputMergerShaderIndex {
+        size_t meshMode;
+        size_t mergeMode;
     };
 
-    /// @brief Expands a bit-packed non-MSB polygon drawing shader index into its components.
-    /// @param[in] index the polygon drawing shader index
+    /// @brief Expands a bit-packed VDP1 output merger shader index into its components.
+    /// @param[in] index the shader index
     /// @return the index's components
-    PolyDrawShaderIndex ExpandPolyDrawShaderIndex(size_t index) {
+    OutputMergerShaderIndex ExpandVDP1OutputMergerShaderIndex(size_t index) {
         return {
-            .transparentMesh = bit::extract<4>(index),
-            .textured = bit::extract<3>(index),
-            .gouraud = bit::extract<2>(index),
-            .halfSrc = bit::extract<1>(index),
-            .halfDst = bit::extract<0>(index),
+            .meshMode = bit::extract<0>(index),
+            .mergeMode = bit::extract<1, 2>(index),
         };
     }
 
-    struct PolyDrawMSBShaderIndex {
-        size_t transparentMesh;
-        size_t textured;
-    };
-
-    /// @brief Expands a bit-packed MSB polygon drawing shader index into its components.
-    /// @param[in] index the polygon drawing shader index
-    /// @return the index's components
-    PolyDrawMSBShaderIndex ExpandPolyDrawMSBShaderIndex(size_t index) {
-        return {
-            .transparentMesh = bit::extract<1>(index),
-            .textured = bit::extract<0>(index),
-        };
+    std::string GetVDP1OutputMergerShaderVariantName(size_t index) {
+        const OutputMergerShaderIndex components = ExpandVDP1OutputMergerShaderIndex(index);
+        return fmt::format("Ms{}-Mg{}", components.meshMode, components.mergeMode);
     }
 
     // =================================================================================================================
@@ -1764,12 +1775,10 @@ struct Direct3D12VDPRenderer::Impl {
 
         /// @brief Descriptor range for drawing polygons (non-MSB variants).
         DescriptorRange polyDrawDescs;
-        /// @brief Pipeline state objects for drawing polygons (non-MSB variants).
-        std::array<D3D12PipelineState, 2 * 2 * 8> polyDrawPSOs;
         /// @brief Descriptor range for drawing polygons (MSB variants).
         DescriptorRange polyDrawMSBDescs;
-        /// @brief Pipeline state objects for drawing polygons (MSB variants).
-        std::array<D3D12PipelineState, 2 * 2> polyDrawMSBPSOs;
+        /// @brief Pipeline state objects for drawing polygons.
+        std::array<D3D12PipelineState, 2 * 4> polyDrawPSOs;
 
         /// @brief Descriptor range for the output merger.
         DescriptorRange outputMergerDescs;
@@ -2141,15 +2150,15 @@ struct Direct3D12VDPRenderer::Impl {
             }
         }
 
-        // Polygon drawing (non-MSB variants)
+        // Polygon drawing
         for (size_t shaderIndex = 0; shaderIndex < vdp1.polyDrawShaders.size(); ++shaderIndex) {
-            const auto [meshMode, textured, gouraud, halfSrc, halfDst] = ExpandPolyDrawShaderIndex(shaderIndex);
-            std::string filename = fmt::format("src/vdp/cs_vdp1_polydraw_{}_{}_{}_{}_{}.cso", meshMode, textured,
-                                               gouraud, halfSrc, halfDst);
+            const auto [meshMode, shadingMode] = ExpandVDP1PolyDrawShaderIndex(shaderIndex);
+            const std::string variantName = GetVDP1PolyDrawShaderVariantName(shaderIndex);
+            const std::string filename = fmt::format("src/vdp/cs_vdp1_polydraw_{}_{}.cso", meshMode, shadingMode);
             auto shaderBlobResult = LoadShader(filename.c_str());
             if (!shaderBlobResult) {
                 return util::ErrorMessage{
-                    fmt::format("Could not load VDP1 polygon drawing compute shader variant {}: {}", shaderIndex,
+                    fmt::format("Could not load VDP1 polygon drawing compute shader variant {}: {}", variantName,
                                 shaderBlobResult.Error().message)};
             }
             gpu::ComputeShader &polyDrawShader = vdp1.polyDrawShaders[shaderIndex];
@@ -2159,29 +2168,7 @@ struct Direct3D12VDPRenderer::Impl {
             auto result = gpu::ValidateShader(polyDrawShader);
             if (!result) {
                 return util::ErrorMessage{
-                    fmt::format("VDP1 polygon drawing compute shader variant {} validation failed: {}", shaderIndex,
-                                result.Error().message)};
-            }
-        }
-
-        // Polygon drawing (MSB variants)
-        for (size_t shaderIndex = 0; shaderIndex < vdp1.polyDrawMSBShaders.size(); ++shaderIndex) {
-            const auto [meshMode, textured] = ExpandPolyDrawMSBShaderIndex(shaderIndex);
-            std::string filename = fmt::format("src/vdp/cs_vdp1_polydraw_msb_{}_{}.cso", meshMode, textured);
-            auto shaderBlobResult = LoadShader(filename.c_str());
-            if (!shaderBlobResult) {
-                return util::ErrorMessage{
-                    fmt::format("Could not load VDP1 MSB polygon drawing compute shader variant {}: {}", shaderIndex,
-                                shaderBlobResult.Error().message)};
-            }
-            gpu::ComputeShader &polyDrawShader = vdp1.polyDrawMSBShaders[shaderIndex];
-            polyDrawShader.format = gpu::ShaderBytecodeFormat::DXIL;
-            polyDrawShader.bytecode = shaderBlobResult.Value();
-            polyDrawShader.entrypoint = kCSEntrypoint;
-            auto result = gpu::ValidateShader(polyDrawShader);
-            if (!result) {
-                return util::ErrorMessage{
-                    fmt::format("VDP1 MSB polygon drawing compute shader variant {} validation failed: {}", shaderIndex,
+                    fmt::format("VDP1 polygon drawing compute shader variant {} validation failed: {}", variantName,
                                 result.Error().message)};
             }
         }
@@ -2201,7 +2188,7 @@ struct Direct3D12VDPRenderer::Impl {
         }
 
         // Polygon drawing root signature.
-        // All non-MSB and MSB variants share the same inputs/outputs shape.
+        // All variants share the same inputs/outputs shape.
         {
             auto rootSigBuilder = vdp1.polyDrawRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1PolyDrawParams)) /
@@ -2218,13 +2205,13 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Polygon output merger shaders
         for (size_t shaderIndex = 0; shaderIndex < vdp1.outputMergerShaders.size(); ++shaderIndex) {
-            const size_t meshMode = bit::extract<0>(shaderIndex);
-            const size_t mergeMode = bit::extract<1, 2>(shaderIndex);
-            std::string filename = fmt::format("src/vdp/cs_vdp1_output_merger_{}_{}.cso", meshMode, mergeMode);
+            const auto [meshMode, mergeMode] = ExpandVDP1OutputMergerShaderIndex(shaderIndex);
+            const std::string variantName = GetVDP1OutputMergerShaderVariantName(shaderIndex);
+            const std::string filename = fmt::format("src/vdp/cs_vdp1_output_merger_{}_{}.cso", meshMode, mergeMode);
             auto shaderBlobResult = LoadShader(filename.c_str());
             if (!shaderBlobResult) {
                 return util::ErrorMessage{fmt::format("Could not load VDP1 output merger compute shader variant {}: {}",
-                                                      shaderIndex, shaderBlobResult.Error().message)};
+                                                      variantName, shaderBlobResult.Error().message)};
             }
             gpu::ComputeShader &outputMergerShader = vdp1.outputMergerShaders[shaderIndex];
             outputMergerShader.format = gpu::ShaderBytecodeFormat::DXIL;
@@ -2233,7 +2220,7 @@ struct Direct3D12VDPRenderer::Impl {
             auto result = gpu::ValidateShader(outputMergerShader);
             if (!result) {
                 return util::ErrorMessage{
-                    fmt::format("VDP1 output merger compute shader variant {} validation failed: {}", shaderIndex,
+                    fmt::format("VDP1 output merger compute shader variant {} validation failed: {}", variantName,
                                 result.Error().message)};
             }
         }
@@ -2393,8 +2380,9 @@ struct Direct3D12VDPRenderer::Impl {
                                         std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
             }
 
-            // Polygon drawing (non-MSB variants)
+            // Polygon drawing pipeline state objects
             for (size_t shaderIndex = 0; shaderIndex < vdp1.polyDrawShaders.size(); ++shaderIndex) {
+                const std::string variantName = GetVDP1PolyDrawShaderVariantName(shaderIndex);
                 const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
                     .pRootSignature = vdp1.polyDrawRootSig.GetPointer(),
                     .CS = ToShaderBytecode(vdp1.polyDrawShaders[shaderIndex]),
@@ -2402,12 +2390,15 @@ struct Direct3D12VDPRenderer::Impl {
                 if (HRESULT hr = frameCtx.polyDrawPSOs[shaderIndex].CreateCompute(device, psoDesc); FAILED(hr)) {
                     return util::ErrorMessage{fmt::format(
                         "Could not build VDP1 polygon drawing variant {} pipeline state object #{}, error code {:X}",
-                        shaderIndex, i, (uint32)hr)};
+                        variantName, i, (uint32)hr)};
                 }
                 frameCtx.polyDrawPSOs[shaderIndex]->SetName(
-                    fmt::format(L"[Ymir-VDP1] Polygon drawing variant {} pipeline state object #{}", shaderIndex, i)
+                    fmt::format(L"[Ymir-VDP1] Polygon drawing variant {} pipeline state object #{}",
+                                util::StringToWString(variantName), i)
                         .c_str());
             }
+
+            // Polygon drawing descriptors (non-MSB variants)
             {
                 const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
                     frameCtx.spanParamsSRV.cpuHandle,
@@ -2427,21 +2418,7 @@ struct Direct3D12VDPRenderer::Impl {
                                         std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
             }
 
-            // Polygon drawing (MSB variants)
-            for (size_t shaderIndex = 0; shaderIndex < vdp1.polyDrawMSBShaders.size(); ++shaderIndex) {
-                const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-                    .pRootSignature = vdp1.polyDrawRootSig.GetPointer(),
-                    .CS = ToShaderBytecode(vdp1.polyDrawMSBShaders[shaderIndex]),
-                };
-                if (HRESULT hr = frameCtx.polyDrawMSBPSOs[shaderIndex].CreateCompute(device, psoDesc); FAILED(hr)) {
-                    return util::ErrorMessage{fmt::format("Could not build VDP1 polygon drawing MSB variant {} "
-                                                          "pipeline state object #{}, error code {:X}",
-                                                          shaderIndex, i, (uint32)hr)};
-                }
-                frameCtx.polyDrawMSBPSOs[shaderIndex]->SetName(
-                    fmt::format(L"[Ymir-VDP1] Polygon drawing MSB variant {} pipeline state object #{}", shaderIndex, i)
-                        .c_str());
-            }
+            // Polygon drawing descriptors (MSB variant only)
             {
                 const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
                     frameCtx.spanParamsSRV.cpuHandle,
@@ -2463,6 +2440,7 @@ struct Direct3D12VDPRenderer::Impl {
 
             // Output merger
             for (size_t shaderIndex = 0; shaderIndex < vdp1.outputMergerShaders.size(); ++shaderIndex) {
+                const std::string variantName = GetVDP1OutputMergerShaderVariantName(shaderIndex);
                 const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
                     .pRootSignature = vdp1.outputMergerRootSig.GetPointer(),
                     .CS = ToShaderBytecode(vdp1.outputMergerShaders[shaderIndex]),
@@ -2470,10 +2448,11 @@ struct Direct3D12VDPRenderer::Impl {
                 if (HRESULT hr = frameCtx.outputMergerPSOs[shaderIndex].CreateCompute(device, psoDesc); FAILED(hr)) {
                     return util::ErrorMessage{fmt::format(
                         "Could not build VDP1 output merger variant {} pipeline state object #{}, error code {:X}",
-                        shaderIndex, i, (uint32)hr)};
+                        variantName, i, (uint32)hr)};
                 }
                 frameCtx.outputMergerPSOs[shaderIndex]->SetName(
-                    fmt::format(L"[Ymir-VDP1] Output merger variant {} pipeline state object #{}", shaderIndex, i)
+                    fmt::format(L"[Ymir-VDP1] Output merger variant {} pipeline state object #{}",
+                                util::StringToWString(variantName), i)
                         .c_str());
             }
             {
@@ -3402,11 +3381,6 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     void VDP1ExecuteCommand(uint32 cmdAddress, VDP1Command::Control control) {
-        // TODO: only flush VRAM on draw commands; the other commands don't dispatch shaders
-        if (auto result = VDP1FlushVRAM(); !result) {
-            devlog::warn<grp::dx12_vdp1>("VDP1 VRAM flush failed: {}", result.Error().message);
-        }
-
         switch (control.command) {
         case VDP1Command::CommandType::DrawNormalSprite: VDP1Cmd_DrawNormalSprite(cmdAddress, control); break;
         case VDP1Command::CommandType::DrawScaledSprite: VDP1Cmd_DrawScaledSprite(cmdAddress, control); break;
@@ -3451,6 +3425,10 @@ struct Direct3D12VDPRenderer::Impl {
         // Clear spans even if we fail to submit them to avoid crashes on extreme cases.
         // Errors should never happen, however.
         util::ScopeGuard sgClearSpans{[&] { frameCtx.cpuSpanCount = 0; }};
+
+        if (auto result = VDP1FlushVRAM(); !result) {
+            devlog::warn<grp::dx12_vdp1>("VDP1 VRAM flush failed: {}", result.Error().message);
+        }
 
         ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
         UploadAllocation alloc{};
@@ -3501,36 +3479,30 @@ struct Direct3D12VDPRenderer::Impl {
         VDP1UpdateCommonRenderParams();
         vdp1.cpuPolyDrawParams.numSpans = frameCtx.cpuSpanCount;
 
-        // Dispatch polygon drawing shader
-        if (vdp1.currPolyDrawShaderMSB) {
+        const bool isMSB = IsVDP1PolyDrawShaderMSB(vdp1.currPolyDrawShaderIndex);
+
+        if (isMSB) {
             barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                             D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
-            barrierTracker.Flush(cmdList);
+        }
+        barrierTracker.Flush(cmdList);
 
-            cmdList->SetPipelineState(frameCtx.polyDrawMSBPSOs[vdp1.currPolyDrawShaderIndex].GetPointer());
-            cmdList->SetComputeRootSignature(vdp1.polyDrawRootSig.GetPointer());
-            cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
-                                                  &vdp1.cpuCommonRenderParams, 0);
-            cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuPolyDrawParams) / sizeof(uint32),
-                                                  &vdp1.cpuPolyDrawParams,
-                                                  sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32));
-            cmdList->SetComputeRootDescriptorTable(1, frameCtx.polyDrawMSBDescs.gpuHandle);
-            cmdList->Dispatch((frameCtx.cpuSpanPrefixSums[frameCtx.cpuSpanCount] + 63) / 64, 1, 1);
+        // Dispatch polygon drawing shader
+        const D3D12_GPU_DESCRIPTOR_HANDLE descsHandle =
+            isMSB ? frameCtx.polyDrawMSBDescs.gpuHandle : frameCtx.polyDrawDescs.gpuHandle;
+        cmdList->SetPipelineState(frameCtx.polyDrawPSOs[vdp1.currPolyDrawShaderIndex].GetPointer());
+        cmdList->SetComputeRootSignature(vdp1.polyDrawRootSig.GetPointer());
+        cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
+                                              &vdp1.cpuCommonRenderParams, 0);
+        cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuPolyDrawParams) / sizeof(uint32),
+                                              &vdp1.cpuPolyDrawParams,
+                                              sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32));
+        cmdList->SetComputeRootDescriptorTable(1, descsHandle);
+        cmdList->Dispatch((frameCtx.cpuSpanPrefixSums[frameCtx.cpuSpanCount] + 63) / 64, 1, 1);
 
-            // MSB shader applies directly to FBRAM, no merger needed
-        } else {
-            barrierTracker.Flush(cmdList);
-
-            cmdList->SetPipelineState(frameCtx.polyDrawPSOs[vdp1.currPolyDrawShaderIndex].GetPointer());
-            cmdList->SetComputeRootSignature(vdp1.polyDrawRootSig.GetPointer());
-            cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
-                                                  &vdp1.cpuCommonRenderParams, 0);
-            cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuPolyDrawParams) / sizeof(uint32),
-                                                  &vdp1.cpuPolyDrawParams,
-                                                  sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32));
-            cmdList->SetComputeRootDescriptorTable(1, frameCtx.polyDrawDescs.gpuHandle);
-            cmdList->Dispatch((frameCtx.cpuSpanPrefixSums[frameCtx.cpuSpanCount] + 63) / 64, 1, 1);
-
+        // Merge output into FBRAM if needed.
+        // MSB shader writes directly to FBRAM, no merging needed.
+        if (!isMSB) {
             barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                             D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
             barrierTracker.UAVBuffer(frameCtx.internalSpriteOutBuffer.GetPointer());
@@ -3572,16 +3544,14 @@ struct Direct3D12VDPRenderer::Impl {
         params.enhancements.transparentMeshes = enhancements.transparentMeshes;
     }
 
-    void VDP1SelectPolyDrawShader(bool textured, VDP1Command::DrawMode mode) {
+    void VDP1SelectPolyDrawShader(VDP1Command::DrawMode mode) {
         // Submit existing spans before switching shaders
-        const size_t polyDrawIndex = MakeVDP1PolyDrawShaderIndex(textured, mode);
+        const size_t polyDrawIndex = MakeVDP1PolyDrawShaderIndex(mode);
         const size_t outputMergerIndex = MakeVDP1OutputMergerShaderIndex(mode);
-        if (vdp1.currPolyDrawShaderIndex != polyDrawIndex || vdp1.currOutputMergerShaderIndex != outputMergerIndex ||
-            vdp1.currPolyDrawShaderMSB != mode.msbOn) {
+        if (vdp1.currPolyDrawShaderIndex != polyDrawIndex || vdp1.currOutputMergerShaderIndex != outputMergerIndex) {
             VDP1SubmitSpans();
             vdp1.currPolyDrawShaderIndex = polyDrawIndex;
             vdp1.currOutputMergerShaderIndex = outputMergerIndex;
-            vdp1.currPolyDrawShaderMSB = mode.msbOn;
         }
     }
 
@@ -3603,7 +3573,7 @@ struct Direct3D12VDPRenderer::Impl {
         }
 
         // Switch polygon drawing shader based on the current settings
-        VDP1SelectPolyDrawShader(textured, data.mode);
+        VDP1SelectPolyDrawShader(data.mode);
 
         // Determine span length
         LineStepper line{coord0, coord1};
@@ -3647,6 +3617,7 @@ struct Direct3D12VDPRenderer::Impl {
             spanParams.gouraud1.b = data.gouraud1.b;
         }
 
+        spanParams.textured = textured;
         if (textured) {
             spanParams.cmdsize = data.size.u16;
             spanParams.charAddr = data.charAddr;

@@ -648,7 +648,7 @@ function(compile_shader)
     endif ()
 
     # Apply variant name suffix if specified
-    if (ARG_VARIANT)
+    if (NOT "${ARG_VARIANT}" STREQUAL "")
         set(_final_name "${_base_name}_${ARG_VARIANT}")
     else ()
         set(_final_name "${_base_name}")
