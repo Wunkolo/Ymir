@@ -9,7 +9,7 @@ cbuffer CommonRenderParamsBuffer : register(b0) {
     EraseParams g_eraseParams;
 }
 
-RWByteAddressBuffer fbramOut : register(u1);
+RWByteAddressBuffer g_fbramOut : register(u1);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -61,14 +61,14 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint writeValue = BitExtract(g_eraseParams.erase, 0, 16);
     uint value;
     if (partialWrite) {
-        value = fbramOut.Load(address);
+        value = g_fbramOut.Load(address);
         value &= ~0xFFFF;
         value |= writeValue;
     } else {
         value = (writeValue << 16u) | writeValue;
 
     }
-    fbramOut.Store(address, value);
+    g_fbramOut.Store(address, value);
     // TODO: handle enhancements
     // if (transparentMeshes) {
     //     // TODO: write 0 to transparent mesh buffer

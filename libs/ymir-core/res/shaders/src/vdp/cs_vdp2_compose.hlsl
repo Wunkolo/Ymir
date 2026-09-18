@@ -10,14 +10,14 @@ cbuffer CommonRenderParams : register(b0) {
     CommonRenderParams g_commonParams;
 }
 
-StructuredBuffer<ComposeParams> composeParams : register(t1);
-Texture2DArray<uint4> layerIn : register(t2);
-Buffer<uint> lnclBackIn : register(t3);
-Texture2DArray<uint4> rbgLineColorIn : register(t4);
-Texture2DArray<uint> spriteAttrsIn : register(t5);
-Texture2D<uint> colorCalcWindowIn : register(t6);
+StructuredBuffer<ComposeParams> g_composeParams : register(t1);
+Texture2DArray<uint4> g_layerIn : register(t2);
+Buffer<uint> g_lnclBackIn : register(t3);
+Texture2DArray<uint4> g_rbgLineColorIn : register(t4);
+Texture2DArray<uint> g_spriteAttrsIn : register(t5);
+Texture2D<uint> g_colorCalcWindowIn : register(t6);
 
-RWTexture2D<float4> compositeOut : register(u0);
+RWTexture2D<float4> g_compositeOut : register(u0);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Definitions
@@ -129,7 +129,7 @@ uint GetColorGradScreenLayerIndex(uint colorGradScreen) {
 }
 
 bool IsColorCalcEnabled(uint layer, uint2 pos) {
-    const bool enabled = BitTest(composeParams[0].colorCalcEnable, layer);
+    const bool enabled = BitTest(g_composeParams[0].colorCalcEnable, layer);
     if (layer >= kLayerBack) {
         // Back and line screen layers use the enable bit alone
         return enabled;
@@ -138,17 +138,17 @@ bool IsColorCalcEnabled(uint layer, uint2 pos) {
         // Color calculation is disabled for this layer
         return false;
     }
-    if (colorCalcWindowIn[pos] != 0) {
+    if (g_colorCalcWindowIn[pos] != 0) {
         return false;
     }
     const bool restrictedColorCalc = BitTest(g_commonParams.layerParams, 24);
     if (layer == kLayerSprite) {
         // Sprites use condition modes based on priority or color MSB
-        const uint layerAttrs = layerIn[uint3(pos, kLayerIndexSprite)].a;
+        const uint layerAttrs = g_layerIn[uint3(pos, kLayerIndexSprite)].a;
         if (restrictedColorCalc && BitTest(layerAttrs, kPixelAttrBitSpecColorCalc)) {
             return false;
         }
-        const uint attrs = spriteAttrsIn[uint3(pos, 0)];
+        const uint attrs = g_spriteAttrsIn[uint3(pos, 0)];
         const uint priority = BitExtract(layerAttrs, 0, 3);
         const uint value = BitExtract(g_commonParams.spriteParams, 11, 3);
         const uint cond = BitExtract(g_commonParams.spriteParams, 14, 2);
@@ -166,7 +166,7 @@ bool IsColorCalcEnabled(uint layer, uint2 pos) {
     }
     // BG layers use the per-pixel special color calculation flag
     const uint bgLayer = GetBGLayerIndex(layer);
-    const uint attrs = layerIn[uint3(pos.xy, bgLayer)].a;
+    const uint attrs = g_layerIn[uint3(pos.xy, bgLayer)].a;
     if (restrictedColorCalc && BitTest(attrs, kPixelAttrBitPaletteFormat)) {
         return false;
     }
@@ -174,7 +174,7 @@ bool IsColorCalcEnabled(uint layer, uint2 pos) {
 }
 
 bool IsLineColorEnabled(uint layer, uint2 pos) {
-    return BitTest(composeParams[0].lineColorEnable, layer);
+    return BitTest(g_composeParams[0].lineColorEnable, layer);
 }
 
 uint3 Color888(uint val32) {
@@ -187,27 +187,27 @@ uint3 Color888(uint val32) {
 
 uint3 GetLineColor(uint layer, uint2 pos) {
     if (layer == kLayerRBG0 || (layer == kLayerNBG0_RBG1 && IsBGLayerEnabled(kBGLayerRBG1))) {
-        return rbgLineColorIn[uint3(pos, layer - kLayerRBG0)].rgb;
+        return g_rbgLineColorIn[uint3(pos, layer - kLayerRBG0)].rgb;
     }
-    return Color888(lnclBackIn[GetLoResInputY(pos.y)]);
+    return Color888(g_lnclBackIn[GetLoResInputY(pos.y)]);
 }
 
 int GetColorCalcRatio(uint layer, uint2 pos) {
     switch (layer) {
         case kLayerSprite:
-            return BitExtract(spriteAttrsIn[uint3(pos, 0)], kSpriteAttrBitColorCalcRatio, 5);
+            return BitExtract(g_spriteAttrsIn[uint3(pos, 0)], kSpriteAttrBitColorCalcRatio, 5);
         case kLayerRBG0:
         case kLayerNBG0_RBG1:
         case kLayerNBG1_EXBG:
         case kLayerNBG2:
         case kLayerNBG3:
-            return composeParams[0].bgColorCalcRatios[layer - kLayerRBG0];
+            return g_composeParams[0].bgColorCalcRatios[layer - kLayerRBG0];
         case kLayerBack:
         case kLayerLine:
             if (IsColorCalcEnabled(layer, pos)) {
-                return composeParams[0].backLineColorCalcRatios[1];
+                return g_composeParams[0].backLineColorCalcRatios[1];
             } else {
-                return composeParams[0].backLineColorCalcRatios[0];
+                return g_composeParams[0].backLineColorCalcRatios[0];
             }
         default:
             return 31;
@@ -215,12 +215,12 @@ int GetColorCalcRatio(uint layer, uint2 pos) {
 }
 
 bool IsColorOffsetEnabled(uint layer) {
-    return BitTest(composeParams[0].colorOffsetEnable, layer);
+    return BitTest(g_composeParams[0].colorOffsetEnable, layer);
 }
 
 int3 GetColorOffset(uint layer) {
-    const bool selB = BitTest(composeParams[0].colorOffsetSelect, layer);
-    return selB ? composeParams[0].colorOffsetB : composeParams[0].colorOffsetA;
+    const bool selB = BitTest(g_composeParams[0].colorOffsetSelect, layer);
+    return selB ? g_composeParams[0].colorOffsetB : g_composeParams[0].colorOffsetA;
 }
 
 uint4 GetLayerOutput(uint layer, uint2 pos) {
@@ -232,11 +232,11 @@ uint4 GetLayerOutput(uint layer, uint2 pos) {
         case kLayerNBG1_EXBG:
         case kLayerNBG2:
         case kLayerNBG3:
-            return layerIn[uint3(pos.xy, GetBGLayerIndex(layer))];
+            return g_layerIn[uint3(pos.xy, GetBGLayerIndex(layer))];
         case kLayerBack:
-            return uint4(Color888(lnclBackIn[GetLoResInputY(pos.y) + kMaxResV]), 0); // the attribute byte doesn't matter
+            return uint4(Color888(g_lnclBackIn[GetLoResInputY(pos.y) + kMaxResV]), 0); // the attribute byte doesn't matter
         case kLayerLine:
-            return uint4(Color888(lnclBackIn[GetLoResInputY(pos.y)]), 0); // the attribute byte doesn't matter
+            return uint4(Color888(g_lnclBackIn[GetLoResInputY(pos.y)]), 0); // the attribute byte doesn't matter
         default:
             return kTransparentPixel; // should never happpen
     }
@@ -266,7 +266,7 @@ uint3 Compose(uint2 basePos) {
         const bool borderColorMode = BitTest(g_commonParams.displayParams, 1);
         if (borderColorMode) {
             // Use back screen color
-            return Color888(lnclBackIn[GetLoResInputY(pos.y) + kMaxResV]);
+            return Color888(g_lnclBackIn[GetLoResInputY(pos.y) + kMaxResV]);
         }
         return uint3(0, 0, 0);
     }
@@ -291,7 +291,7 @@ uint3 Compose(uint2 basePos) {
 
         // Skip normal shadow sprite layer pixels
         if (layer == kLayerSprite) {
-            const uint spriteAttrs = spriteAttrsIn[uint3(pos, 0)];
+            const uint spriteAttrs = g_spriteAttrsIn[uint3(pos, 0)];
             if (BitExtract(spriteAttrs, kSpriteAttrBitSpecial, 2) != kSpriteDataNormal) {
                 continue;
             }
@@ -322,7 +322,7 @@ uint3 Compose(uint2 basePos) {
         const uint4 meshOutput = GetLayerOutput(kLayerMesh, pos);
         meshPixel = meshOutput.rgb;
         const Attributes meshAttrs = ToAttributes(meshOutput.a);
-        const uint meshSpriteAttrs = spriteAttrsIn[uint3(pos, 1)];
+        const uint meshSpriteAttrs = g_spriteAttrsIn[uint3(pos, 1)];
         if (meshAttrs.priority > 0 && BitExtract(meshSpriteAttrs, kSpriteAttrBitSpecial, 2) != kSpriteDataShadow) {
             for (uint i = 0; i < 3; i++) {
                 // The sprite layer has the highest priority on ties, so the priority check can be simplified.
@@ -414,7 +414,7 @@ uint3 Compose(uint2 basePos) {
     const uint4 spriteOutput = GetLayerOutput(kLayerSprite, pos);
     const uint spritePriority = BitExtract(spriteOutput.a, 0, 3);
     if (spritePriority >= layerPrios[0]) {
-        const uint spriteAttrs = spriteAttrsIn[uint3(pos, 0)];
+        const uint spriteAttrs = g_spriteAttrsIn[uint3(pos, 0)];
         const bool useSpriteWindow = BitTest(g_commonParams.spriteParams, 19);
         const bool isNormalShadow = BitExtract(spriteAttrs, kSpriteAttrBitSpecial, 2) == kSpriteDataShadow;
         const bool isMSBShadow = !useSpriteWindow && BitTest(spriteAttrs, kSpriteAttrBitShadowWindow);
@@ -465,5 +465,5 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint2 outCoord = uint2(drawCoord.x, GetOutputY(drawCoord.y));
     const uint3 outColor = Compose(drawCoord);
-    compositeOut[outCoord] = float4(outColor / 255.0, 1.0f);
+    g_compositeOut[outCoord] = float4(outColor / 255.0, 1.0f);
 }

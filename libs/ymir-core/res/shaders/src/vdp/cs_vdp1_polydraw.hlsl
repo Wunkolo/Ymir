@@ -57,14 +57,14 @@ cbuffer RenderParamsBuffer : register(b0) {
     PolyDrawParams g_polyDrawParams;
 }
 
-StructuredBuffer<PolySpan> spanParams : register(t1);
-Buffer<uint> spanPrefixSums : register(t2);
-ByteAddressBuffer vram : register(t3);
+StructuredBuffer<PolySpan> g_spanParams : register(t1);
+Buffer<uint> g_spanPrefixSums : register(t2);
+ByteAddressBuffer g_vram : register(t3);
 
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
-RWByteAddressBuffer fbramOut : register(u1);
+RWByteAddressBuffer g_fbramOut : register(u1);
 #else
-RWBuffer<uint> internalSpriteOut : register(u1);
+RWBuffer<uint> g_internalSpriteOut : register(u1);
 #endif
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -104,7 +104,7 @@ static const uint2 userClip1 = uint2(
 // Searches for the span containing the given pixel index.
 // Returns 0xFFFFFFFF if out of range.
 uint GetSpanIndex(uint pixelIndex) {
-    if (pixelIndex >= spanPrefixSums[g_polyDrawParams.numSpans]) {
+    if (pixelIndex >= g_spanPrefixSums[g_polyDrawParams.numSpans]) {
         return 0xFFFFFFFF;
     }
 
@@ -118,7 +118,7 @@ uint GetSpanIndex(uint pixelIndex) {
     uint ub = g_polyDrawParams.numSpans;
     while (lb != ub) {
         const uint midpoint = (lb + ub) >> 1u;
-        const uint value = spanPrefixSums[midpoint];
+        const uint value = g_spanPrefixSums[midpoint];
         if (pixelIndex == value) {
             return midpoint;
         }
@@ -436,41 +436,41 @@ void ReadTexel(uint u, uint v, uint charAddress, uint charSizeH, uint colorMode,
 
     switch (colorMode) {
         case 0: // 4 bpp, 16 colors, bank mode
-            color = Read8(vram, charAddress + (charIndex >> 1));
+            color = Read8(g_vram, charAddress + (charIndex >> 1));
             color = (color >> ((~u & 1) * 4)) & 0xF;
             hasEndCode = color == 0xF;
             transparent = color == 0x0;
             color |= colorData & 0xFFF0;
             break;
         case 1: // 4 bpp, 16 colors, lookup table mode
-            color = Read8(vram, charAddress + (charIndex >> 1));
+            color = Read8(g_vram, charAddress + (charIndex >> 1));
             color = (color >> ((~u & 1) * 4)) & 0xF;
             hasEndCode = color == 0xF;
             transparent = color == 0x0;
-            color = Read16(vram, color * 2 + colorData * 8);
+            color = Read16(g_vram, color * 2 + colorData * 8);
             break;
         case 2: // 8 bpp, 64 colors, bank mode
-            color = Read8(vram, charAddress + charIndex);
+            color = Read8(g_vram, charAddress + charIndex);
             transparent = color == 0x00;
             hasEndCode = color == 0xFF;
             color &= 0x3F;
             color |= colorData & 0xFFC0;
             break;
         case 3: // 8 bpp, 128 colors, bank mode
-            color = Read8(vram, charAddress + charIndex);
+            color = Read8(g_vram, charAddress + charIndex);
             transparent = color == 0x00;
             hasEndCode = color == 0xFF;
             color &= 0x7F;
             color |= colorData & 0xFF80;
             break;
         case 4: // 8 bpp, 256 colors, bank mode
-            color = Read8(vram, charAddress + charIndex);
+            color = Read8(g_vram, charAddress + charIndex);
             transparent = color == 0x00;
             hasEndCode = color == 0xFF;
             color |= colorData & 0xFF00;
             break;
         case 5: // 16 bpp, 32768 colors, RGB mode
-            color = Read16(vram, (charAddress & ~0xF) + charIndex * 2);
+            color = Read16(g_vram, (charAddress & ~0xF) + charIndex * 2);
             transparent = !BitTest(color, 15);
             hasEndCode = color == 0x7FFF;
             break;
@@ -492,8 +492,8 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         return;
     }
 
-    const PolySpan span = spanParams[spanIndex];
-    const uint spanStep = id.x - spanPrefixSums[spanIndex] + span.skip;
+    const PolySpan span = g_spanParams[spanIndex];
+    const uint spanStep = id.x - g_spanPrefixSums[spanIndex] + span.skip;
     const bool meshEnable = BitTest(span.cmdpmodcolr, 8);
     const bool cullMeshPixels = !POLYSPEC_TRANSPARENT_MESH && meshEnable;
     // TODO: POLYSPEC_TRANSPARENT_MESH should output to the mesh buffer
@@ -581,7 +581,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         } else {
             outOffset <<= 1u;
         }
-        WriteOr16(fbramOut, outOffset + fbOffset, 0x8000);
+        WriteOr16(g_fbramOut, outOffset + fbOffset, 0x8000);
     }
 
     if (antialias && lineStepper.NeedsAA()) {
@@ -593,7 +593,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             } else {
                 aaOutOffset <<= 1u;
             }
-            WriteOr16(fbramOut, aaOutOffset + fbOffset, 0x8000);
+            WriteOr16(g_fbramOut, aaOutOffset + fbOffset, 0x8000);
         }
     }
 
@@ -607,13 +607,13 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const int2 coord = lineStepper.Coord();
     if (!cullMeshPixels || !IsMeshCulled(coord)) {
         const uint outOffset = coord.y * fbSize.x + coord.x;
-        InterlockedAdd(internalSpriteOut[outOffset], 1);
+        InterlockedAdd(g_internalSpriteOut[outOffset], 1);
     }
     if (antialias && lineStepper.NeedsAA()) {
         const int2 aaCoord = lineStepper.AACoord();
         if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
             const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
-            InterlockedAdd(internalSpriteOut[aaOutOffset], 1);
+            InterlockedAdd(g_internalSpriteOut[aaOutOffset], 1);
         }
     }
 
@@ -667,14 +667,14 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const int2 coord = lineStepper.Coord();
     if (!cullMeshPixels || !IsMeshCulled(coord)) {
         const uint outOffset = coord.y * fbSize.x + coord.x;
-        InterlockedMax(internalSpriteOut[outOffset], value);
+        InterlockedMax(g_internalSpriteOut[outOffset], value);
     }
 
     if (antialias && lineStepper.NeedsAA()) {
         const int2 aaCoord = lineStepper.AACoord();
         if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
             const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
-            InterlockedMax(internalSpriteOut[aaOutOffset], value);
+            InterlockedMax(g_internalSpriteOut[aaOutOffset], value);
         }
     }
 #endif // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT

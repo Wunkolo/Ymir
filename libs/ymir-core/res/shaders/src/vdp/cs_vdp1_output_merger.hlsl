@@ -24,8 +24,8 @@ cbuffer RenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
 }
 
-RWByteAddressBuffer fbramOut : register(u1);
-RWBuffer<uint> internalSpriteOut : register(u2);
+RWByteAddressBuffer g_fbramOut : register(u1);
+RWBuffer<uint> g_internalSpriteOut : register(u2);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -55,10 +55,10 @@ void Merge8(uint2 pos) {
     const uint inOffset = pos.x * 4 + pos.y * fbSize.x;
 
     // Read and clear internal outputs
-    const uint out0 = internalSpriteOut[inOffset + 0];
-    const uint out1 = internalSpriteOut[inOffset + 1];
-    const uint out2 = internalSpriteOut[inOffset + 2];
-    const uint out3 = internalSpriteOut[inOffset + 3];
+    const uint out0 = g_internalSpriteOut[inOffset + 0];
+    const uint out1 = g_internalSpriteOut[inOffset + 1];
+    const uint out2 = g_internalSpriteOut[inOffset + 2];
+    const uint out3 = g_internalSpriteOut[inOffset + 3];
 
     const uint counter0 = BitExtract(out0, 16, 16);
     const uint counter1 = BitExtract(out1, 16, 16);
@@ -68,13 +68,13 @@ void Merge8(uint2 pos) {
         // Nothing written to these pixels
         return;
     }
-    internalSpriteOut[inOffset + 0] = 0;
-    internalSpriteOut[inOffset + 1] = 0;
-    internalSpriteOut[inOffset + 2] = 0;
-    internalSpriteOut[inOffset + 3] = 0;
+    g_internalSpriteOut[inOffset + 0] = 0;
+    g_internalSpriteOut[inOffset + 1] = 0;
+    g_internalSpriteOut[inOffset + 2] = 0;
+    g_internalSpriteOut[inOffset + 3] = 0;
 
     const uint outOffset = inOffset;
-    uint fbramValue = fbramOut.Load(outOffset + fbOffset);
+    uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (counter0 != 0) {
         fbramValue &= ~0xFFu;
         fbramValue |= BitExtract(out0, 0, 8);
@@ -91,15 +91,15 @@ void Merge8(uint2 pos) {
         fbramValue &= ~0xFF000000u;
         fbramValue |= BitExtract(out3, 0, 8) << 24u;
     }
-    fbramOut.Store(outOffset + fbOffset, fbramValue);
+    g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
 void Merge16(uint2 pos) {
     const uint inOffset = pos.x * 2 + pos.y * fbSize.x;
 
     // Read and clear internal outputs
-    const uint out0 = internalSpriteOut[inOffset + 0];
-    const uint out1 = internalSpriteOut[inOffset + 1];
+    const uint out0 = g_internalSpriteOut[inOffset + 0];
+    const uint out1 = g_internalSpriteOut[inOffset + 1];
 
     const uint counter0 = BitExtract(out0, 16, 16);
     const uint counter1 = BitExtract(out1, 16, 16);
@@ -107,11 +107,11 @@ void Merge16(uint2 pos) {
         // Nothing written to these pixels
         return;
     }
-    internalSpriteOut[inOffset + 0] = 0;
-    internalSpriteOut[inOffset + 1] = 0;
+    g_internalSpriteOut[inOffset + 0] = 0;
+    g_internalSpriteOut[inOffset + 1] = 0;
 
     const uint outOffset = inOffset * 2;
-    uint fbramValue = fbramOut.Load(outOffset + fbOffset);
+    uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (counter0 != 0) {
         fbramValue &= ~0xFFFFu;
         fbramValue |= BitExtract(out0, 0, 16);
@@ -120,7 +120,7 @@ void Merge16(uint2 pos) {
         fbramValue &= ~0xFFFF0000u;
         fbramValue |= BitExtract(out1, 0, 16) << 16u;
     }
-    fbramOut.Store(outOffset + fbOffset, fbramValue);
+    g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
 #elif POLYSPEC_MERGE_MODE == 1
@@ -135,17 +135,17 @@ void Merge16(uint2 pos) {
     const uint inOffset = pos.x * 2 + pos.y * fbSize.x;
 
     // Read and clear internal outputs
-    const uint shift0 = min(internalSpriteOut[inOffset + 0], 5);
-    const uint shift1 = min(internalSpriteOut[inOffset + 1], 5);
+    const uint shift0 = min(g_internalSpriteOut[inOffset + 0], 5);
+    const uint shift1 = min(g_internalSpriteOut[inOffset + 1], 5);
     if (shift0 == 0 && shift1 == 0) {
         // Nothing written to these pixels
         return;
     }
-    internalSpriteOut[inOffset + 0] = 0;
-    internalSpriteOut[inOffset + 1] = 0;
+    g_internalSpriteOut[inOffset + 0] = 0;
+    g_internalSpriteOut[inOffset + 1] = 0;
 
     const uint outOffset = inOffset * 2;
-    uint fbramValue = fbramOut.Load(outOffset + fbOffset);
+    uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (shift0 != 0) {
         uint4 color = Uint16ToColor555(BitExtract(fbramValue, 0, 16));
         if (color.a != 0u) {
@@ -162,7 +162,7 @@ void Merge16(uint2 pos) {
             fbramValue |= Color555ToUint16(color) << 16u;
         }
     }
-    fbramOut.Store(outOffset + fbOffset, fbramValue);
+    g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
 #elif POLYSPEC_MERGE_MODE == 2

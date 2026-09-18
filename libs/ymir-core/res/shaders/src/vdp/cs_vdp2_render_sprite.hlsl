@@ -11,14 +11,14 @@ cbuffer CommonRenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
 }
 
-StructuredBuffer<LayerRenderParams> layerRenderParams : register(t1);
-ByteAddressBuffer vram : register(t2);
-Buffer<uint4> cramColor : register(t3);
-StructuredBuffer<RotParamBase> rotParamBases : register(t4);
-ByteAddressBuffer spriteFB : register(t5);
+StructuredBuffer<LayerRenderParams> g_layerRenderParams : register(t1);
+ByteAddressBuffer g_vram : register(t2);
+Buffer<uint4> g_cramColor : register(t3);
+StructuredBuffer<RotParamBase> g_rotParamBases : register(t4);
+ByteAddressBuffer g_spriteFB : register(t5);
 
-RWTexture2DArray<uint4> layerOut : register(u0);
-RWTexture2D<uint> spriteAttrsOut : register(u1);
+RWTexture2DArray<uint4> g_layerOut : register(u0);
+RWTexture2D<uint> g_spriteAttrsOut : register(u1);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -54,12 +54,12 @@ static const uint kVDP1MeshFBOffset = kVDP1FBRAMSize * 2 * 2;
 
 uint ReadSprite8(uint address) {
     address += kSpriteFBBaseOffset;
-    return BitExtract(spriteFB.Load(address & ~3), (address & 3) * 8, 8);
+    return BitExtract(g_spriteFB.Load(address & ~3), (address & 3) * 8, 8);
 }
 
 uint ReadSprite16(uint address) {
     address += kSpriteFBBaseOffset;
-    return BitExtract(spriteFB.Load(address & ~3), (address & 2) * 8, 16);
+    return BitExtract(g_spriteFB.Load(address & ~3), (address & 2) * 8, 16);
 }
 
 uint ReadMesh8(uint address) {
@@ -84,7 +84,7 @@ uint GetY(uint y) {
 
 uint4 FetchCRAMColor(uint cramOffset, uint colorIndex) {
     const uint cramAddress = (cramOffset + colorIndex) & kCRAMAddressMask;
-    return cramColor[cramAddress];
+    return g_cramColor[cramAddress];
 }
 
 uint4 Color555(uint val16) {
@@ -106,8 +106,8 @@ bool InsideWindow(GlobalWindowParams window, bool invert, uint2 pos) {
     // Read line window if enabled
     if (window.lineWindowTableEnable) {
         const uint address = window.lineWindowTableAddress + pos.y * 4;
-        start.x = Read16(vram, address + 0);
-        end.x = Read16(vram, address + 2);
+        start.x = Read16(g_vram, address + 0);
+        end.x = Read16(g_vram, address + 2);
     }
 
     start.x = SignExtend(start.x, 16);
@@ -164,7 +164,7 @@ bool InsideWindows(uint2 pos) {
 
     bool inside = windowLogicAND;
     if (window0Enable) {
-        const bool insideW0 = InsideWindow(layerRenderParams[0].windows[0], window0Invert, pos);
+        const bool insideW0 = InsideWindow(g_layerRenderParams[0].windows[0], window0Invert, pos);
         if (windowLogicAND) {
             inside = inside && insideW0;
         } else {
@@ -172,7 +172,7 @@ bool InsideWindows(uint2 pos) {
         }
     }
     if (window1Enable) {
-        const bool insideW1 = InsideWindow(layerRenderParams[0].windows[1], window1Invert, pos);
+        const bool insideW1 = InsideWindow(g_layerRenderParams[0].windows[1], window1Invert, pos);
         if (windowLogicAND) {
             inside = inside && insideW1;
         } else {
@@ -187,16 +187,16 @@ bool InsideWindows(uint2 pos) {
 // Rotation parameter calculation
 
 uint2 CalcRotationSpriteCoordinates(uint2 pos) {
-    const RotParamBase base = rotParamBases[pos.y];
+    const RotParamBase base = g_rotParamBases[pos.y];
 
-    const int Xst = SignExtend(Read32(vram, base.tableAddress + 0x00) >> 6, 23);
-    const int Yst = SignExtend(Read32(vram, base.tableAddress + 0x04) >> 6, 23);
+    const int Xst = SignExtend(Read32(g_vram, base.tableAddress + 0x00) >> 6, 23);
+    const int Yst = SignExtend(Read32(g_vram, base.tableAddress + 0x04) >> 6, 23);
 
-    const int deltaXst = SignExtend(Read32(vram, base.tableAddress + 0x0C) >> 6, 13);
-    const int deltaYst = SignExtend(Read32(vram, base.tableAddress + 0x10) >> 6, 13);
+    const int deltaXst = SignExtend(Read32(g_vram, base.tableAddress + 0x0C) >> 6, 13);
+    const int deltaYst = SignExtend(Read32(g_vram, base.tableAddress + 0x10) >> 6, 13);
 
-    const int deltaX = SignExtend(Read32(vram, base.tableAddress + 0x14) >> 6, 13);
-    const int deltaY = SignExtend(Read32(vram, base.tableAddress + 0x18) >> 6, 13);
+    const int deltaX = SignExtend(Read32(g_vram, base.tableAddress + 0x14) >> 6, 13);
+    const int deltaY = SignExtend(Read32(g_vram, base.tableAddress + 0x18) >> 6, 13);
 
     // Current sprite coordinates (13.10)
     // 10 + 0*10 + 0*10 = 10 + 10 + 10 = 10 frac bits
@@ -494,8 +494,8 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
     const uint3 outCoord = uint3(drawCoord.x, GetY(drawCoord.y), id.z + 6);
     const SpriteOutput output = DrawSprite(drawCoord, outCoord.xy, id.z);
-    layerOut[outCoord] = output.layer;
-    spriteAttrsOut[outCoord.xy] =
+    g_layerOut[outCoord] = output.layer;
+    g_spriteAttrsOut[outCoord.xy] =
         output.colorCalcRatio |
         ((output.colorMSB ? 1u : 0u) << kSpriteAttrBitColorMSB) |
         ((output.shadowOrWindow ? 1u : 0u) << kSpriteAttrBitShadowWindow) |

@@ -411,8 +411,8 @@ set(COMPUTE_SHADER_SOURCES
 foreach (_transparent_mesh RANGE 1)
     set(_macros_transparent_mesh "POLYSPEC_TRANSPARENT_MESH=${_transparent_mesh}")
 
+    # Polygon drawing
     foreach (_shading_mode RANGE 3)
-        # Polygon drawing
         set(_variant_name "${_transparent_mesh}_${_shading_mode}")
         set(_macros_shading_mode "POLYSPEC_SHADING_MODE=${_shading_mode}")
         set(_macros "${_macros_transparent_mesh}|${_macros_shading_mode}")
