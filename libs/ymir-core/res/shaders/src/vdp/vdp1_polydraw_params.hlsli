@@ -14,20 +14,13 @@ struct PolySpan {
     int2 coord0;
     int2 coord1;
     uint skip;
-    bool antialias;
+    uint attrs;
 
     uint3 gouraud0;
     uint3 gouraud1;
 
-    uint cmdpmod;
-    uint cmdcolr;
-    uint cmdsize;
-    uint charAddr;
-
-    bool textured;
-    uint texV;
-    bool flipH;
-    uint endCodeIndex;
+    uint cmdpmodcolr;
+    uint cmdsizesrca;
 };
 
 #endif

@@ -870,25 +870,28 @@ struct Direct3D12VDPRenderer::Impl {
     };
 
     struct VDP1SpanParams {
-        HLSLint2 coord0;    // Starting coordinates
-        HLSLint2 coord1;    // Ending coordinates
-        HLSLuint skip;      // Initial skip steps
-        HLSLbool antialias; // Antialias line
+        HLSLint2 coord0; // Starting coordinates
+        HLSLint2 coord1; // Ending coordinates
+        HLSLuint skip;   // Initial skip steps
+
+        struct Attributes {             //  bits  use
+            HLSLuint antialias : 1;     //     0  Antialias line
+            HLSLuint textured : 1;      //     1  Textured polygon
+            HLSLuint flipH : 1;         //     2  Horizontal flip
+                                        // --- texture only ---
+            HLSLuint texV : 10;         //  3-12  Texture V coordinate
+            HLSLuint endCodeIndex : 10; // 13-22  U coordinate of the second end code
+        } attrs;
+        static_assert(sizeof(Attributes) == sizeof(HLSLuint));
 
         // Gouraud only parameters
         HLSLuint3 gouraud0; // Starting gouraud value
         HLSLuint3 gouraud1; // Ending gouraud value
 
-        HLSLuint cmdpmod;  // CMDPMOD value
-        HLSLuint cmdcolr;  // CMDCOLR value
-        HLSLuint cmdsize;  // CMDSIZE value (textured only)
-        HLSLuint charAddr; // CMDSRCA value * 8 (textured only)
-
-        // Textured only parameters
-        HLSLbool textured;     // Textured polygon
-        HLSLuint texV;         // Texture V coordinate
-        HLSLbool flipH;        // Horizontal flip
-        HLSLuint endCodeIndex; // U coordinate of the second end code
+        HLSLuint cmdpmod : 16; // CMDPMOD value
+        HLSLuint cmdcolr : 16; // CMDCOLR value
+        HLSLuint cmdsize : 16; // CMDSIZE value (textured only)
+        HLSLuint cmdsrca : 16; // CMDSRCA value (textured only)
     };
 
     /// @brief Maximum number of spans to send per batch.
@@ -3606,7 +3609,7 @@ struct Direct3D12VDPRenderer::Impl {
         const uint32 dx = abs(x1 - x0);
         const uint32 dy = abs(y1 - y0);
         spanParams.skip = skip;
-        spanParams.antialias = antialias;
+        spanParams.attrs.antialias = antialias;
 
         if (data.mode.gouraudEnable) {
             spanParams.gouraud0.r = data.gouraud0.r;
@@ -3617,14 +3620,14 @@ struct Direct3D12VDPRenderer::Impl {
             spanParams.gouraud1.b = data.gouraud1.b;
         }
 
-        spanParams.textured = textured;
+        spanParams.attrs.textured = textured;
         if (textured) {
             spanParams.cmdsize = data.size.u16;
-            spanParams.charAddr = data.charAddr;
+            spanParams.cmdsrca = data.charAddr >> 3u;
 
-            spanParams.texV = data.texV;
-            spanParams.flipH = data.flipH;
-            spanParams.endCodeIndex = data.endCodeIndex;
+            spanParams.attrs.texV = data.texV;
+            spanParams.attrs.flipH = data.flipH;
+            spanParams.attrs.endCodeIndex = data.endCodeIndex;
         }
 
         // Update prefix sum

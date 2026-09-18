@@ -494,27 +494,31 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     const PolySpan span = spanParams[spanIndex];
     const uint spanStep = id.x - spanPrefixSums[spanIndex] + span.skip;
-    const bool meshEnable = BitTest(span.cmdpmod, 8);
+    const bool meshEnable = BitTest(span.cmdpmodcolr, 8);
     const bool cullMeshPixels = !POLYSPEC_TRANSPARENT_MESH && meshEnable;
     // TODO: POLYSPEC_TRANSPARENT_MESH should output to the mesh buffer
     // TODO: handle dblInterlaceEnable, dblInterlaceDrawLine, deinterlace
 
+    const bool antialias = BitTest(span.attrs, 0);
+    const bool textured = BitTest(span.attrs, 1);
+    const uint cmdcolr = BitExtract(span.cmdpmodcolr, 16, 16);
+
     LineStepper lineStepper;
-    lineStepper.Setup(span.coord0, span.coord1, span.antialias);
+    lineStepper.Setup(span.coord0, span.coord1, antialias);
     lineStepper.SetStep(spanStep);
 
     uint spriteData;
-    if (span.textured) {
+    if (textured) {
         // ---------------------------------------------------------------------
         // Textured polygon
 
         TextureStepper uStepper;
-        const uint charSizeH = max(BitExtract(span.cmdsize, 8, 6) << 3, 1);
-        const bool flipH = span.flipH;
-        const uint colorMode = BitExtract(span.cmdpmod, 3, 3);
-        const bool transparentPixelDisable = BitTest(span.cmdpmod, 6);
-        const bool endCodesEnabled = !BitTest(span.cmdpmod, 7);
-        const bool useHighSpeedShrink = BitTest(span.cmdpmod, 12) && lineStepper.Length() < charSizeH - 1;
+        const uint charSizeH = max(BitExtract(span.cmdsizesrca, 8, 6) << 3, 1);
+        const bool flipH = BitTest(span.attrs, 2);
+        const uint colorMode = BitExtract(span.cmdpmodcolr, 3, 3);
+        const bool transparentPixelDisable = BitTest(span.cmdpmodcolr, 6);
+        const bool endCodesEnabled = !BitTest(span.cmdpmodcolr, 7);
+        const bool useHighSpeedShrink = BitTest(span.cmdpmodcolr, 12) && lineStepper.Length() < charSizeH - 1;
         const bool evenOddCoordSelect = BitTest(g_commonParams.displayParams, 6);
 
         int uStart = 0;
@@ -531,7 +535,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         uint endCodeIndex;
         bool checkEndCodes;
         if (endCodesEnabled && !useHighSpeedShrink) {
-            endCodeIndex = span.endCodeIndex;
+            endCodeIndex = BitExtract(span.attrs, 13, 10);
             checkEndCodes = endCodeIndex < charSizeH;
         } else {
             checkEndCodes = false;
@@ -543,9 +547,11 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             return;
         }
 
+        const uint texV = BitExtract(span.attrs, 3, 10);
+        const uint charAddr = BitExtract(span.cmdsizesrca, 16, 16) << 3u;
         bool transparent;
         bool hasEndCode;
-        ReadTexel(texU, span.texV, span.charAddr, charSizeH, colorMode, span.cmdcolr, spriteData, transparent, hasEndCode);
+        ReadTexel(texU, texV, charAddr, charSizeH, colorMode, cmdcolr, spriteData, transparent, hasEndCode);
 
         if ((hasEndCode && endCodesEnabled) || (transparent && !transparentPixelDisable)) {
             // Transparent pixel
@@ -555,7 +561,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         // -------------------------------------------------------------------------
         // Solid color polygon
 
-        spriteData = span.cmdcolr;
+        spriteData = cmdcolr;
         if (pixel8Bits) {
             spriteData &= 0xFFu;
         }
@@ -578,7 +584,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         WriteOr16(fbramOut, outOffset + fbOffset, 0x8000);
     }
 
-    if (span.antialias && lineStepper.NeedsAA()) {
+    if (antialias && lineStepper.NeedsAA()) {
         const int2 aaCoord = lineStepper.AACoord();
         if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
             uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
@@ -603,7 +609,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         const uint outOffset = coord.y * fbSize.x + coord.x;
         InterlockedAdd(internalSpriteOut[outOffset], 1);
     }
-    if (span.antialias && lineStepper.NeedsAA()) {
+    if (antialias && lineStepper.NeedsAA()) {
         const int2 aaCoord = lineStepper.AACoord();
         if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
             const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
@@ -615,8 +621,8 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     // =========================================================================
     // Non-MSB: Replace, Half-Luminance or Half-Transparency
 
-    const uint shadingMode = BitExtract(span.cmdpmod, 0, 2);
-    const bool gouraudEnable = BitTest(span.cmdpmod, 2);
+    const uint shadingMode = BitExtract(span.cmdpmodcolr, 0, 2);
+    const bool gouraudEnable = BitTest(span.cmdpmodcolr, 2);
 
     // Modify source color depending on the mode
     if (!pixel8Bits && (gouraudEnable || shadingMode == kColorBlendModeHalfLuminance)) {
@@ -664,7 +670,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         InterlockedMax(internalSpriteOut[outOffset], value);
     }
 
-    if (span.antialias && lineStepper.NeedsAA()) {
+    if (antialias && lineStepper.NeedsAA()) {
         const int2 aaCoord = lineStepper.AACoord();
         if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
             const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
