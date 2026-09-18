@@ -37,7 +37,7 @@
 //   - MSB applies the bit directly to FBRAM with InterlockedOr (or set bits in a dedicated buffer; check which is faster)
 //   - Replace and Half-Luminance use InterlockedMax with a sequence number to write the latest version of a pixel to the output
 //   - Shadow increments per-pixel shift counters with InterlockedAdd
-//   - Half-Transparency uses an order-independent transparency algorithm [TBD]
+//   - Half-Transparency uses aper-pixel linked lists for order-independent transparency
 // - The output merger shader applies the output of this shader to the output FBRAM in 32-bit units (2 or 4 pixels at a time)
 //   - Skipped for MSB (unless using a dedicated buffer)
 
@@ -49,7 +49,7 @@
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
 #define POLYSPEC_TRANSPARENT_MESH 0
-#define POLYSPEC_SHADING_MODE     POLYSPEC_SHADING_MODE_COPY
+#define POLYSPEC_SHADING_MODE     2
 #endif
 
 cbuffer RenderParamsBuffer : register(b0) {
@@ -62,9 +62,22 @@ Buffer<uint> g_spanPrefixSums : register(t2);
 ByteAddressBuffer g_vram : register(t3);
 
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
+
+// MSB writes directly to FBRAM
 RWByteAddressBuffer g_fbramOut : register(u1);
+
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
+
+// Half-Transparency uses per-pixel linked lists for order-independent transparency
+RWBuffer<uint> g_listHeads : register(u1);
+RWStructuredBuffer<OITFragment> g_fragments : register(u2);
+RWByteAddressBuffer g_counter : register(u3);
+
 #else
+
+// All other modes write to the internal output buffer
 RWBuffer<uint> g_internalSpriteOut : register(u1);
+
 #endif
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -482,6 +495,39 @@ bool IsMeshCulled(int2 coord) {
     return BitTest(coord.x ^ coord.y, 0);
 }
 
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
+
+void WriteOutput(uint offset, uint value) {
+    // -------------------------------------------------------------------------
+    // Half-Transparency
+
+    // Append entry to pixel's node list
+
+    uint nodeIndex;
+    g_counter.InterlockedAdd(0, 1, nodeIndex);
+
+    uint oldHead;
+    InterlockedExchange(g_listHeads[offset], nodeIndex, oldHead);
+
+    OITFragment node;
+    node.data = value;
+    node.next = oldHead;
+    g_fragments[nodeIndex] = node;
+}
+
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY
+
+void WriteOutput(uint offset, uint value) {
+    // -------------------------------------------------------------------------
+    // Replace or Half-Luminance
+
+    // Output pixel with the highest sequence number
+
+    InterlockedMax(g_internalSpriteOut[offset], value);
+}
+
+#endif
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Entrypoint
 
@@ -648,36 +694,19 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     const uint value = spriteData | ((spanIndex + 1u) << 16u);
 
-    // Output pixel depending on the mode
-#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
-    // -------------------------------------------------------------------------
-    // Half-Transparency
-
-    // TODO: use OIT algorithm
-    // see https://github.com/nvpro-samples/vk_order_independent_transparency
-    // - Linked List
-    // - Loop32
-    // - Spinlock
-#else // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY
-    // -------------------------------------------------------------------------
-    // Replace or Half-Luminance
-
-    // Output pixels with the highest sequence number.
-
     const int2 coord = lineStepper.Coord();
     if (!cullMeshPixels || !IsMeshCulled(coord)) {
         const uint outOffset = coord.y * fbSize.x + coord.x;
-        InterlockedMax(g_internalSpriteOut[outOffset], value);
+        WriteOutput(outOffset, value);
     }
 
     if (antialias && lineStepper.NeedsAA()) {
         const int2 aaCoord = lineStepper.AACoord();
         if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
             const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
-            InterlockedMax(g_internalSpriteOut[aaOutOffset], value);
+            WriteOutput(aaOutOffset, value);
         }
     }
-#endif // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
 
 #endif // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
 }

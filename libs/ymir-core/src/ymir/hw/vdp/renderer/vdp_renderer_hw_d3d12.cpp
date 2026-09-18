@@ -894,11 +894,19 @@ struct Direct3D12VDPRenderer::Impl {
         HLSLuint cmdsrca : 16; // CMDSRCA value (textured only)
     };
 
+    struct VDP1OITFragment {
+        HLSLuint data;
+        HLSLuint next;
+    };
+
     /// @brief Maximum number of spans to send per batch.
     static constexpr uint32 kMaxVDP1Spans = 65535;
 
-    /// @brief Maximum number of pixels per dispatch.
-    static constexpr uint32 kMaxVDP1PixelsPerDispatch = 4194240;
+    /// @brief Maximum number of non-OIT fragments per dispatch.
+    static constexpr uint32 kMaxVDP1FragmentsPerDispatch = 4194240;
+
+    /// @brief Maximum number of OIT fragments per dispatch.
+    static constexpr uint32 kMaxVDP1OITFragmentsPerDispatch = 524288;
 
     // The polygon drawing shader uses the span index as a sequence number to enable parallel drawing.
     // This sequence has to fit in the top 16 bits of the output value, limiting the number of span drawn per
@@ -908,7 +916,8 @@ struct Direct3D12VDPRenderer::Impl {
 
     // The absolute maximum limit for pixels per dispatch is dictated by the maximum number of compute dispatch groups.
     // Each group has 64 threads, as defined in the polygon drawing shader.
-    static_assert(kMaxVDP1PixelsPerDispatch <= 65535 * 64);
+    static_assert(kMaxVDP1FragmentsPerDispatch <= 65535 * 64);
+    static_assert(kMaxVDP1OITFragmentsPerDispatch <= 65535 * 64);
 
     struct VDP1Resources {
         VDP1Resources() {
@@ -981,8 +990,11 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief Compute shaders for drawing polygons.
         std::array<gpu::ComputeShader, 2 * 4> polyDrawShaders;
         /// @brief Root signature for drawing polygons.
-        /// Applies to all variants of the polygon drawing shader.
+        /// Applies to all non-OIT variants of the polygon drawing shader.
         D3D12RootSignature polyDrawRootSig;
+        /// @brief Root signature for drawing polygons.
+        /// Applies to the OIT variant of the polygon drawing shader.
+        D3D12RootSignature polyDrawOITRootSig;
 
         // The polygon output merger shader applies the output of the polygon drawing shader to FBRAM, operating on
         // 32-bit values at a time.
@@ -996,8 +1008,10 @@ struct Direct3D12VDPRenderer::Impl {
 
         /// @brief Compute shaders for merging polygon outputs.
         std::array<gpu::ComputeShader, 2 * 3> outputMergerShaders;
-        /// @brief Root signature for merging polygon outputs.
+        /// @brief Root signature for merging polygon outputs (non-OIT variants).
         D3D12RootSignature outputMergerRootSig;
+        /// @brief Root signature for merging polygon outputs (OIT variant only).
+        D3D12RootSignature outputMergerOITRootSig;
 
         // ---------------------------------------------------------------------
         // Rendering state
@@ -1043,6 +1057,13 @@ struct Direct3D12VDPRenderer::Impl {
         };
     }
 
+    /// @brief Determines if the given polygon drawing shader variant uses OIT shading mode.
+    /// @param[in] index the shader index
+    /// @return `true` if the shader uses OIT shading mode, `false` otherwise
+    bool IsVDP1PolyDrawShaderOIT(size_t index) {
+        return bit::extract<1, 2>(index) == 2;
+    }
+
     /// @brief Determines if the given polygon drawing shader variant uses MSB shading mode.
     /// @param[in] index the shader index
     /// @return `true` if the shader uses MSB shading mode, `false` otherwise
@@ -1050,6 +1071,9 @@ struct Direct3D12VDPRenderer::Impl {
         return bit::extract<1, 2>(index) == 3;
     }
 
+    /// @brief Retrieves the name of a polygon drawing shader variant.
+    /// @param[in] index the shader index
+    /// @return the shader variant name of the form "Ms#-Sh#"
     std::string GetVDP1PolyDrawShaderVariantName(size_t index) {
         const PolyDrawShaderIndex components = ExpandVDP1PolyDrawShaderIndex(index);
         return fmt::format("Ms{}-Sh{}", components.meshMode, components.shadingMode);
@@ -1088,6 +1112,16 @@ struct Direct3D12VDPRenderer::Impl {
         };
     }
 
+    /// @brief Determines if the given output merger shader variant uses OIT merging mode.
+    /// @param[in] index the shader index
+    /// @return `true` if the shader uses OIT merging mode, `false` otherwise
+    bool IsVDP1OutputMergerShaderOIT(size_t index) {
+        return bit::extract<1, 2>(index) == 2;
+    }
+
+    /// @brief Retrieves the name of an output merger shader variant.
+    /// @param[in] index the shader index
+    /// @return the shader variant name of the form "Ms#-Mg#"
     std::string GetVDP1OutputMergerShaderVariantName(size_t index) {
         const OutputMergerShaderIndex components = ExpandVDP1OutputMergerShaderIndex(index);
         return fmt::format("Ms{}-Mg{}", components.meshMode, components.mergeMode);
@@ -1771,20 +1805,41 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief Internal sprite data output buffer UAV (offline).
         DescriptorRange internalSpriteOutUAV;
 
+        /// @brief Internal OIT fragments list heads buffer.
+        D3D12Resource oitListHeadsBuffer;
+        /// @brief Internal OIT fragments list heads UAV (offline).
+        DescriptorRange oitListHeadsUAV;
+
+        /// @brief Internal OIT fragment nodes buffer.
+        D3D12Resource oitFragmentsBuffer;
+        /// @brief Internal OIT fragment nodes SRV (offline).
+        DescriptorRange oitFragmentsSRV;
+        /// @brief Internal OIT fragment nodes UAV (offline).
+        DescriptorRange oitFragmentsUAV;
+
+        /// @brief Internal OIT counter buffer.
+        D3D12Resource oitCounterBuffer;
+        /// @brief Internal OIT counter UAV (offline).
+        DescriptorRange oitCounterUAV;
+
         /// @brief Descriptor range for erasing the framebuffer.
         DescriptorRange eraseDescs;
         /// @brief Pipeline state object for erasing the framebuffer.
         D3D12PipelineState erasePSO;
 
-        /// @brief Descriptor range for drawing polygons (non-MSB variants).
+        /// @brief Descriptor range for drawing polygons (Copy and Shift variants).
         DescriptorRange polyDrawDescs;
+        /// @brief Descriptor range for drawing polygons (OIT variants).
+        DescriptorRange polyDrawOITDescs;
         /// @brief Descriptor range for drawing polygons (MSB variants).
         DescriptorRange polyDrawMSBDescs;
         /// @brief Pipeline state objects for drawing polygons.
         std::array<D3D12PipelineState, 2 * 4> polyDrawPSOs;
 
-        /// @brief Descriptor range for the output merger.
+        /// @brief Descriptor range for the output merger (non-OIT variants).
         DescriptorRange outputMergerDescs;
+        /// @brief Descriptor range for the output merger (OIT variants).
+        DescriptorRange outputMergerOITDescs;
         /// @brief Pipeline state objects for the output merger.
         std::array<D3D12PipelineState, 2 * 3> outputMergerPSOs;
 
@@ -2191,7 +2246,7 @@ struct Direct3D12VDPRenderer::Impl {
         }
 
         // Polygon drawing root signature.
-        // All variants share the same inputs/outputs shape.
+        // All variants except OIT share the same inputs/outputs shape.
         {
             auto rootSigBuilder = vdp1.polyDrawRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1PolyDrawParams)) /
@@ -2204,6 +2259,19 @@ struct Direct3D12VDPRenderer::Impl {
                     fmt::format("Could not build VDP1 polygon drawing root signature, error code {:X}", (uint32)hr)};
             }
             vdp1.polyDrawRootSig->SetName(L"[Ymir-VDP1] Polygon drawing root signature");
+        }
+        {
+            auto rootSigBuilder = vdp1.polyDrawOITRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1PolyDrawParams)) /
+                                                    sizeof(uint32));
+            rootSigBuilder.AddDescriptorTable()
+                .AddSRVs(3, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(3, 1); // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not build VDP1 polygon drawing OIT root signature, error code {:X}", (uint32)hr)};
+            }
+            vdp1.polyDrawOITRootSig->SetName(L"[Ymir-VDP1] Polygon drawing OIT root signature");
         }
 
         // Polygon output merger shaders
@@ -2228,7 +2296,7 @@ struct Direct3D12VDPRenderer::Impl {
             }
         }
 
-        // Polygon output merger root signature
+        // Polygon output merger root signature (non-OIT variants)
         {
             auto rootSigBuilder = vdp1.outputMergerRootSig.Builder();
             rootSigBuilder.Add32BitConstants(0, sizeof(VDP1CommonRenderParams) / sizeof(uint32));
@@ -2239,6 +2307,21 @@ struct Direct3D12VDPRenderer::Impl {
                     fmt::format("Could not build VDP1 output merger root signature, error code {:X}", (uint32)hr)};
             }
             vdp1.outputMergerRootSig->SetName(L"[Ymir-VDP1] Output merger root signature");
+        }
+
+        // Polygon output merger root signature (OIT variant)
+        {
+            auto rootSigBuilder = vdp1.outputMergerOITRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, sizeof(VDP1CommonRenderParams) / sizeof(uint32));
+
+            rootSigBuilder.AddDescriptorTable()
+                .AddSRVs(1, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(2, 1); // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not build VDP1 output merger OIT root signature, error code {:X}", (uint32)hr)};
+            }
+            vdp1.outputMergerOITRootSig->SetName(L"[Ymir-VDP1] Output merger OIT root signature");
         }
 
         // -------------------------------------------------------------------------------------------------------------
@@ -2354,6 +2437,129 @@ struct Direct3D12VDPRenderer::Impl {
                                                   frameCtx.internalSpriteOutUAV.cpuHandle);
             }
 
+            // OIT fragments list heads buffer
+            {
+                // Each entry in this buffer represents a logical output pixel.
+                // Entries are 32-bit, holding the index of the head of the list.
+                auto builder = frameCtx.oitListHeadsBuffer.BufferBuilder(kVDP1FBRAMSize * 2 * sizeof(HLSLuint));
+                builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                    return util::ErrorMessage{fmt::format(
+                        "Could not create VDP1 OIT fragments list heads buffer #{}, error code {:X}", i, (uint32)hr)};
+                }
+                frameCtx.oitListHeadsBuffer->SetName(
+                    fmt::format(L"[Ymir-VDP1] OIT fragments list heads buffer #{}", i).c_str());
+
+                barrierTracker.InitializeBuffer(
+                    frameCtx.oitListHeadsBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+
+                if (!offlineHeapAlloc.Allocate(frameCtx.oitListHeadsUAV)) {
+                    return util::ErrorMessage{
+                        fmt::format("Could not allocate VDP1 OIT fragments list heads buffer UAV #{}", i)};
+                }
+                const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+                    .Format = DXGI_FORMAT_UNKNOWN,
+                    .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                    .Buffer =
+                        {
+                            .FirstElement = 0,
+                            .NumElements = kVDP1FBRAMSize * 2,
+                            .StructureByteStride = sizeof(HLSLuint),
+                            .CounterOffsetInBytes = 0,
+                            .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
+                        },
+                };
+                device->CreateUnorderedAccessView(frameCtx.oitListHeadsBuffer.GetPointer(), nullptr, &uavDesc,
+                                                  frameCtx.oitListHeadsUAV.cpuHandle);
+            }
+
+            // OIT fragments buffer
+            {
+                auto builder = frameCtx.oitFragmentsBuffer.BufferBuilder(kMaxVDP1OITFragmentsPerDispatch *
+                                                                         sizeof(VDP1OITFragment));
+                builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                    return util::ErrorMessage{
+                        fmt::format("Could not create VDP1 OIT fragments buffer #{}, error code {:X}", i, (uint32)hr)};
+                }
+                frameCtx.oitFragmentsBuffer->SetName(fmt::format(L"[Ymir-VDP1] OIT fragments buffer #{}", i).c_str());
+
+                barrierTracker.InitializeBuffer(
+                    frameCtx.oitFragmentsBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+
+                if (!offlineHeapAlloc.Allocate(frameCtx.oitFragmentsSRV)) {
+                    return util::ErrorMessage{fmt::format("Could not allocate VDP1 OIT fragments buffer SRV #{}", i)};
+                }
+                const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                    .Format = DXGI_FORMAT_UNKNOWN,
+                    .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                    .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                    .Buffer =
+                        {
+                            .FirstElement = 0,
+                            .NumElements = kMaxVDP1OITFragmentsPerDispatch,
+                            .StructureByteStride = sizeof(VDP1OITFragment),
+                            .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                        },
+                };
+                device->CreateShaderResourceView(frameCtx.oitFragmentsBuffer.GetPointer(), &srvDesc,
+                                                 frameCtx.oitFragmentsSRV.cpuHandle);
+
+                if (!offlineHeapAlloc.Allocate(frameCtx.oitFragmentsUAV)) {
+                    return util::ErrorMessage{fmt::format("Could not allocate VDP1 OIT fragments buffer UAV #{}", i)};
+                }
+                const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+                    .Format = DXGI_FORMAT_UNKNOWN,
+                    .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                    .Buffer =
+                        {
+                            .FirstElement = 0,
+                            .NumElements = kMaxVDP1OITFragmentsPerDispatch,
+                            .StructureByteStride = sizeof(VDP1OITFragment),
+                            .CounterOffsetInBytes = 0,
+                            .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
+                        },
+                };
+                device->CreateUnorderedAccessView(frameCtx.oitFragmentsBuffer.GetPointer(), nullptr, &uavDesc,
+                                                  frameCtx.oitFragmentsUAV.cpuHandle);
+            }
+
+            // OIT counter buffer
+            {
+                // This buffer contains a single `uint` used as an atomic counter.
+                auto builder = frameCtx.oitCounterBuffer.BufferBuilder(sizeof(HLSLuint));
+                builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                    return util::ErrorMessage{
+                        fmt::format("Could not create VDP1 OIT counter buffer #{}, error code {:X}", i, (uint32)hr)};
+                }
+                frameCtx.oitCounterBuffer->SetName(fmt::format(L"[Ymir-VDP1] OIT counter buffer #{}", i).c_str());
+
+                barrierTracker.InitializeBuffer(
+                    frameCtx.oitCounterBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+
+                if (!offlineHeapAlloc.Allocate(frameCtx.oitCounterUAV)) {
+                    return util::ErrorMessage{fmt::format("Could not allocate VDP1 OIT counter buffer UAV #{}", i)};
+                }
+                const D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
+                    .Format = DXGI_FORMAT_R32_TYPELESS,
+                    .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                    .Buffer =
+                        {
+                            .FirstElement = 0,
+                            .NumElements = 1,
+                            .StructureByteStride = 0,
+                            .CounterOffsetInBytes = 0,
+                            .Flags = D3D12_BUFFER_UAV_FLAG_RAW,
+                        },
+                };
+                device->CreateUnorderedAccessView(frameCtx.oitCounterBuffer.GetPointer(), nullptr, &uavDesc,
+                                                  frameCtx.oitCounterUAV.cpuHandle);
+            }
+
             // Framebuffer erase
             {
                 const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -2386,8 +2592,9 @@ struct Direct3D12VDPRenderer::Impl {
             // Polygon drawing pipeline state objects
             for (size_t shaderIndex = 0; shaderIndex < vdp1.polyDrawShaders.size(); ++shaderIndex) {
                 const std::string variantName = GetVDP1PolyDrawShaderVariantName(shaderIndex);
+                const bool isOIT = IsVDP1PolyDrawShaderOIT(shaderIndex);
                 const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-                    .pRootSignature = vdp1.polyDrawRootSig.GetPointer(),
+                    .pRootSignature = isOIT ? vdp1.polyDrawOITRootSig.GetPointer() : vdp1.polyDrawRootSig.GetPointer(),
                     .CS = ToShaderBytecode(vdp1.polyDrawShaders[shaderIndex]),
                 };
                 if (HRESULT hr = frameCtx.polyDrawPSOs[shaderIndex].CreateCompute(device, psoDesc); FAILED(hr)) {
@@ -2401,7 +2608,7 @@ struct Direct3D12VDPRenderer::Impl {
                         .c_str());
             }
 
-            // Polygon drawing descriptors (non-MSB variants)
+            // Polygon drawing descriptors (Copy and Shift variants)
             {
                 const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
                     frameCtx.spanParamsSRV.cpuHandle,
@@ -2418,6 +2625,28 @@ struct Direct3D12VDPRenderer::Impl {
                 }
 
                 device->CopyDescriptors(1, &frameCtx.polyDrawDescs.cpuHandle, &frameCtx.polyDrawDescs.count,
+                                        std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
+            }
+
+            // Polygon drawing descriptors (OIT variant only)
+            {
+                const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                    frameCtx.spanParamsSRV.cpuHandle,
+                    frameCtx.spanPrefixSumsSRV.cpuHandle,
+                    vdp1.vramSRV.cpuHandle,
+                    frameCtx.oitListHeadsUAV.cpuHandle,
+                    frameCtx.oitFragmentsUAV.cpuHandle,
+                    frameCtx.oitCounterUAV.cpuHandle,
+                };
+                std::array<UINT, std::size(srcHandles)> srcSizes{};
+                srcSizes.fill(1);
+
+                if (!resourceHeapAlloc.Allocate(frameCtx.polyDrawOITDescs, std::size(srcHandles))) {
+                    return util::ErrorMessage{
+                        fmt::format("Could not allocate VDP1 polygon drawing OIT descriptors #{}", i)};
+                }
+
+                device->CopyDescriptors(1, &frameCtx.polyDrawOITDescs.cpuHandle, &frameCtx.polyDrawOITDescs.count,
                                         std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
             }
 
@@ -2444,8 +2673,11 @@ struct Direct3D12VDPRenderer::Impl {
             // Output merger
             for (size_t shaderIndex = 0; shaderIndex < vdp1.outputMergerShaders.size(); ++shaderIndex) {
                 const std::string variantName = GetVDP1OutputMergerShaderVariantName(shaderIndex);
+                const bool isOIT = IsVDP1OutputMergerShaderOIT(shaderIndex);
+                ID3D12RootSignature *const rootSig =
+                    isOIT ? vdp1.outputMergerOITRootSig.GetPointer() : vdp1.outputMergerRootSig.GetPointer();
                 const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-                    .pRootSignature = vdp1.outputMergerRootSig.GetPointer(),
+                    .pRootSignature = rootSig,
                     .CS = ToShaderBytecode(vdp1.outputMergerShaders[shaderIndex]),
                 };
                 if (HRESULT hr = frameCtx.outputMergerPSOs[shaderIndex].CreateCompute(device, psoDesc); FAILED(hr)) {
@@ -2472,6 +2704,24 @@ struct Direct3D12VDPRenderer::Impl {
 
                 device->CopyDescriptors(1, &frameCtx.outputMergerDescs.cpuHandle, &frameCtx.outputMergerDescs.count,
                                         std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
+            }
+            {
+                const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                    frameCtx.oitFragmentsSRV.cpuHandle,
+                    vdp1.fbramUAV.cpuHandle,
+                    frameCtx.oitListHeadsUAV.cpuHandle,
+                };
+                std::array<UINT, std::size(srcHandles)> srcSizes{};
+                srcSizes.fill(1);
+
+                if (!resourceHeapAlloc.Allocate(frameCtx.outputMergerOITDescs, std::size(srcHandles))) {
+                    return util::ErrorMessage{
+                        fmt::format("Could not allocate VDP1 output merger OIT descriptors #{}", i)};
+                }
+
+                device->CopyDescriptors(1, &frameCtx.outputMergerOITDescs.cpuHandle,
+                                        &frameCtx.outputMergerOITDescs.count, std::size(srcHandles), srcHandles,
+                                        srcSizes.data(), resourceHeap.GetHeapType());
             }
         }
 
@@ -3185,12 +3435,35 @@ struct Direct3D12VDPRenderer::Impl {
 
         Reset();
 
+        // Initialize command list
         {
             ID3D12DescriptorHeap *heaps[] = {resourceHeap.GetPointer()};
             cmdList->SetDescriptorHeaps(std::size(heaps), heaps);
         }
 
-        // TODO: upload full VDP1 and VDP2 states
+        // Initialize VDP1 OIT fragment list heads buffer
+        for (int i = 0; i < frames.Count(); ++i) {
+            FrameContext &frameCtx = frames[i];
+
+            ID3D12Resource *dstResource = frameCtx.oitListHeadsBuffer.GetPointer();
+            ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
+
+            // Emit barrier transition
+            barrierTracker.TransitionBuffer(dstResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_BARRIER_SYNC_COPY,
+                                            D3D12_BARRIER_ACCESS_COPY_DEST);
+            barrierTracker.Flush(cmdList);
+
+            // Upload default values
+            UploadAllocation alloc{};
+            const size_t size = kVDP1FBRAMSize * 2 * sizeof(HLSLuint);
+            if (auto result = AllocateUploadBuffer(uploadBuffer, size, 4, alloc); !result) {
+                return util::ErrorMessage{fmt::format(
+                    "Failed to allocate upload buffer for VDP1 OIT fragment list heads: {}", result.Error().message)};
+            }
+            std::fill_n(static_cast<HLSLuint *>(alloc.data), kVDP1FBRAMSize * 2, 0xFFFFFFFF);
+
+            cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+        }
 
         return {};
     }
@@ -3482,45 +3755,78 @@ struct Direct3D12VDPRenderer::Impl {
         VDP1UpdateCommonRenderParams();
         vdp1.cpuPolyDrawParams.numSpans = frameCtx.cpuSpanCount;
 
+        const bool isOIT = IsVDP1PolyDrawShaderOIT(vdp1.currPolyDrawShaderIndex);
         const bool isMSB = IsVDP1PolyDrawShaderMSB(vdp1.currPolyDrawShaderIndex);
 
         if (isMSB) {
             barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                             D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+        } else if (isOIT) {
+            barrierTracker.TransitionBuffer(frameCtx.oitListHeadsBuffer.GetPointer(),
+                                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+            barrierTracker.TransitionBuffer(frameCtx.oitFragmentsBuffer.GetPointer(),
+                                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+            barrierTracker.TransitionBuffer(frameCtx.oitCounterBuffer.GetPointer(),
+                                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+            barrierTracker.Flush(cmdList);
+
+            // Reset atomic counter
+            static constexpr UINT kClearValue[4] = {0, 0, 0, 0};
+            cmdList->ClearUnorderedAccessViewUint(frameCtx.polyDrawOITDescs.GetGPUHandle(5),
+                                                  frameCtx.oitCounterUAV.cpuHandle,
+                                                  frameCtx.oitCounterBuffer.GetPointer(), kClearValue, 0, nullptr);
+
+            barrierTracker.UAVBuffer(frameCtx.oitCounterBuffer.GetPointer());
         }
         barrierTracker.Flush(cmdList);
 
         // Dispatch polygon drawing shader
-        const D3D12_GPU_DESCRIPTOR_HANDLE descsHandle =
-            isMSB ? frameCtx.polyDrawMSBDescs.gpuHandle : frameCtx.polyDrawDescs.gpuHandle;
+        const D3D12RootSignature &rootSig = isOIT ? vdp1.polyDrawOITRootSig : vdp1.polyDrawRootSig;
+        const DescriptorRange &descs = isOIT   ? frameCtx.polyDrawOITDescs
+                                       : isMSB ? frameCtx.polyDrawMSBDescs
+                                               : frameCtx.polyDrawDescs;
         cmdList->SetPipelineState(frameCtx.polyDrawPSOs[vdp1.currPolyDrawShaderIndex].GetPointer());
-        cmdList->SetComputeRootSignature(vdp1.polyDrawRootSig.GetPointer());
+        cmdList->SetComputeRootSignature(rootSig.GetPointer());
         cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
                                               &vdp1.cpuCommonRenderParams, 0);
         cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuPolyDrawParams) / sizeof(uint32),
                                               &vdp1.cpuPolyDrawParams,
                                               sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32));
-        cmdList->SetComputeRootDescriptorTable(1, descsHandle);
+        cmdList->SetComputeRootDescriptorTable(1, descs.gpuHandle);
         cmdList->Dispatch((frameCtx.cpuSpanPrefixSums[frameCtx.cpuSpanCount] + 63) / 64, 1, 1);
 
         // Merge output into FBRAM if needed.
         // MSB shader writes directly to FBRAM, no merging needed.
         if (!isMSB) {
+            const bool isMergerOIT = IsVDP1OutputMergerShaderOIT(vdp1.currOutputMergerShaderIndex);
+            if (isMergerOIT) {
+                barrierTracker.TransitionBuffer(
+                    frameCtx.oitListHeadsBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+                barrierTracker.TransitionBuffer(
+                    frameCtx.oitFragmentsBuffer.GetPointer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
+            }
             barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                             D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
             barrierTracker.UAVBuffer(frameCtx.internalSpriteOutBuffer.GetPointer());
             barrierTracker.Flush(cmdList);
 
             // Dispatch output merger shader
+            const D3D12RootSignature &rootSig = isMergerOIT ? vdp1.outputMergerOITRootSig : vdp1.outputMergerRootSig;
+            const DescriptorRange &descs = isMergerOIT ? frameCtx.outputMergerOITDescs : frameCtx.outputMergerDescs;
             const VDP1Regs &regs1 = vdpState.regs1;
             const uint32 pixelsPerEntry = regs1.pixel8Bits ? 4u : 2u; // each entry is 32 bits
             const uint32 mergeW = regs1.fbSizeH / pixelsPerEntry;
             const uint32 mergeH = regs1.fbSizeV;
             cmdList->SetPipelineState(frameCtx.outputMergerPSOs[vdp1.currOutputMergerShaderIndex].GetPointer());
-            cmdList->SetComputeRootSignature(vdp1.outputMergerRootSig.GetPointer());
+            cmdList->SetComputeRootSignature(rootSig.GetPointer());
             cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
                                                   &vdp1.cpuCommonRenderParams, 0);
-            cmdList->SetComputeRootDescriptorTable(1, frameCtx.outputMergerDescs.gpuHandle);
+            cmdList->SetComputeRootDescriptorTable(1, descs.gpuHandle);
             cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, 1);
         }
 
@@ -3592,8 +3898,11 @@ struct Direct3D12VDPRenderer::Impl {
             return false;
         }
 
-        // Submit spans now if the total pixel count would exceed the limit
-        if (frameCtx.cpuSpanPrefixSums[frameCtx.cpuSpanCount] + length >= kMaxVDP1PixelsPerDispatch) {
+        const bool isOIT = IsVDP1PolyDrawShaderOIT(vdp1.currPolyDrawShaderIndex);
+        const uint32 fragLimit = isOIT ? kMaxVDP1OITFragmentsPerDispatch : kMaxVDP1FragmentsPerDispatch;
+
+        // Submit spans now if the total fragment count would exceed the limit
+        if (frameCtx.cpuSpanPrefixSums[frameCtx.cpuSpanCount] + length >= fragLimit) {
             VDP1SubmitSpans();
         }
 

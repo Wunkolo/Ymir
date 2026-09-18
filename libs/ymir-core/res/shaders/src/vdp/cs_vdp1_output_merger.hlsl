@@ -14,6 +14,10 @@
 // Implementation notes:
 // - Works on 32-bit units at a time
 
+#define POLYSPEC_SHADING_MODE_COPY  0
+#define POLYSPEC_SHADING_MODE_SHIFT 1
+#define POLYSPEC_SHADING_MODE_OIT   2
+
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
 #define POLYSPEC_TRANSPARENT_MESH 0
@@ -24,8 +28,14 @@ cbuffer RenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
 }
 
+#if POLYSPEC_MERGE_MODE == POLYSPEC_SHADING_MODE_OIT
+StructuredBuffer<OITFragment> g_fragments : register(t1);
+RWByteAddressBuffer g_fbramOut : register(u1);
+RWBuffer<uint> g_listHeads : register(u2);
+#else
 RWByteAddressBuffer g_fbramOut : register(u1);
 RWBuffer<uint> g_internalSpriteOut : register(u2);
+#endif
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -169,12 +179,79 @@ void Merge16(uint2 pos) {
 // ----------------------------------------------------------------------------
 // OIT (Half-Transparency)
 
+uint HalfTransparentBlend(uint baseColor, uint listHead) {
+    // Early exit if nothing was written to the pixel
+    if (listHead == 0xFFFFFFFF) {
+        return baseColor;
+    }
+
+    // Collect fragments
+    // TODO: what if the cap is exceeded?
+    OITFragment frags[32];
+    uint count = 0;
+    uint curr = listHead;
+    while (curr != 0xFFFFFFFF && count < 32) {
+        frags[count++] = g_fragments[curr];
+        curr = frags[count - 1].next;
+    }
+
+    // Sort by sequence number in descending order (latest to oldest)
+    for (uint i = 1; i < count; ++i) {
+        OITFragment key = frags[i];
+        int j = i - 1;
+        while (j >= 0 && BitExtract(frags[j].data, 16, 16) < BitExtract(key.data, 16, 16)) {
+            frags[j + 1] = frags[j];
+            j--;
+        }
+        frags[j + 1] = key;
+    }
+
+    // Blend colors
+    uint4 finalColor = Uint16ToColor555(baseColor);
+    for (uint k = 0; k < count; ++k) {
+        uint4 fragColor = Uint16ToColor555(frags[k].data);
+        if (finalColor.a != 0) {
+            finalColor.rgb = (finalColor.rgb + fragColor.rgb) >> 1u;
+        } else {
+            finalColor = fragColor;
+        }
+    }
+
+    return Color555ToUint16(finalColor);
+}
+
 void Merge8(uint2 pos) {
     // Half-Transparency does not apply to 8-bit mode.
 }
 
 void Merge16(uint2 pos) {
-    // TODO: implement
+    const uint2 inPos = uint2(pos.x * 2, pos.y);
+
+    const uint2 heads = uint2(
+        g_listHeads[inPos.x + 0 + inPos.y * fbSize.x],
+        g_listHeads[inPos.x + 1 + inPos.y * fbSize.x]
+    );
+
+    // Early exit if nothing was written to either pixel
+    if (all(heads == 0xFFFFFFFF)) {
+        return;
+    }
+
+    // Clear heads
+    g_listHeads[inPos.x + 0 + inPos.y * fbSize.x] = 0xFFFFFFFF;
+    g_listHeads[inPos.x + 1 + inPos.y * fbSize.x] = 0xFFFFFFFF;
+
+    // Get base FBRAM value
+    const uint fbramAddress = (inPos.x + inPos.y * fbSize.x) * 2 + fbOffset;
+    uint fbramValue = g_fbramOut.Load(fbramAddress);
+
+    // Modify
+    fbramValue =
+        (HalfTransparentBlend(BitExtract(fbramValue, 16, 16), heads[1]) << 16u) |
+         HalfTransparentBlend(BitExtract(fbramValue, 0, 16), heads[0]);
+
+    // Write back
+    g_fbramOut.Store(fbramAddress, fbramValue);
 }
 
 #endif
