@@ -66,7 +66,7 @@ static const bool transparentMeshes = BitTest(g_commonParams.enhancements, 1);
 
 uint GetLoResInputY(uint y) {
     if (deinterlace && interlaceMode >= kInterlaceModeSingleDensity && !exclusiveMonitor) {
-        return y >> 1;
+        return y >> 1u;
     } else {
         return y;
     }
@@ -74,7 +74,7 @@ uint GetLoResInputY(uint y) {
 
 uint GetOutputY(uint y) {
     if (!deinterlace && interlaceMode >= kInterlaceModeSingleDensity && !exclusiveMonitor) {
-        return (y << 1) | oddField;
+        return (y << 1u) | oddField;
     } else {
         return y;
     }
@@ -187,7 +187,7 @@ uint3 Color888(uint val32) {
 
 uint3 GetLineColor(uint layer, uint2 pos) {
     if (layer == kLayerRBG0 || (layer == kLayerNBG0_RBG1 && IsBGLayerEnabled(kBGLayerRBG1))) {
-        return g_rbgLineColorIn[uint3(pos, layer - kLayerRBG0)].rgb;
+        return g_rbgLineColorIn[uint3(pos.x, GetLoResInputY(pos.y), layer - kLayerRBG0)].rgb;
     }
     return Color888(g_lnclBackIn[GetLoResInputY(pos.y)]);
 }
