@@ -61,7 +61,8 @@ cbuffer RenderParamsBuffer : register(b0) {
 
 StructuredBuffer<PolySpan> g_spanParams : register(t1);
 Buffer<uint> g_spanPrefixSums : register(t2);
-ByteAddressBuffer g_vram : register(t3);
+StructuredBuffer<CommandParams> g_commandParams : register(t3);
+ByteAddressBuffer g_vram : register(t4);
 
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
 
@@ -96,11 +97,6 @@ static const uint dblInterlaceDrawLine = BitExtract(g_commonParams.displayParams
 static const bool evenOddCoordSelect = BitTest(g_commonParams.displayParams, 6);
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
-
-static const uint2 sysClip = uint2(
-    BitExtract(g_polyDrawParams.sysClip, 0, 16),
-    BitExtract(g_polyDrawParams.sysClip, 16, 16)
-);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Helpers
@@ -482,38 +478,43 @@ void ReadTexel(uint u, uint v, uint charAddress, uint charSizeH, uint colorMode,
 }
 
 struct OutData {
-    uint cmdpmod;
+    uint cmdIndex;
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     uint value;
 #endif
 };
 
 void WriteOutput(int2 coord, OutData data) {
-    // Bounds check
+    const CommandParams cmdParams = g_commandParams[data.cmdIndex];
+
+    // Clip to system area
+    const uint2 sysClip = uint2(
+        BitExtract(cmdParams.sysClip, 0, 16),
+        BitExtract(cmdParams.sysClip, 16, 16)
+    );
     if (any(coord < 0) || any(coord > sysClip)) {
         return;
     }
 
     // Clip to user area
-    // TODO: need to refer to a command list instead
-    /*const bool userClippingEnable = BitTest(data.cmdpmod, 10);
+    const bool userClippingEnable = BitTest(cmdParams.cmdpmodcolr, 10);
     if (userClippingEnable) {
-        const bool clippingMode = BitTest(data.cmdpmod, 9);
+        const bool clippingMode = BitTest(cmdParams.cmdpmodcolr, 9);
         const uint2 userClip0 = uint2(
-            BitExtract(g_polyDrawParams.userClip0, 0, 16),
-            BitExtract(g_polyDrawParams.userClip0, 16, 16)
+            BitExtract(cmdParams.userClip0, 0, 16),
+            BitExtract(cmdParams.userClip0, 16, 16)
         );
         const uint2 userClip1 = uint2(
-            BitExtract(g_polyDrawParams.userClip1, 0, 16),
-            BitExtract(g_polyDrawParams.userClip1, 16, 16)
+            BitExtract(cmdParams.userClip1, 0, 16),
+            BitExtract(cmdParams.userClip1, 16, 16)
         );
-        if (any(coord < userClip0) || any(coord > userClip1) != clippingMode) {
+        if ((any(coord < userClip0) || any(coord > userClip1)) != clippingMode) {
             return;
         }
-    }*/
+    }
 
     // Mesh checkerboard test
-    const bool meshEnable = BitTest(data.cmdpmod, 8);
+    const bool meshEnable = BitTest(cmdParams.cmdpmodcolr, 8);
     if (!POLYSPEC_TRANSPARENT_MESH && meshEnable && BitTest(coord.x ^ coord.y, 0)) {
         return;
     }
@@ -611,11 +612,13 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     }
 
     const PolySpan span = g_spanParams[spanIndex];
-    const uint spanStep = id.x - g_spanPrefixSums[spanIndex] + span.skip;
+    const uint spanStep = id.x - g_spanPrefixSums[spanIndex] + BitExtract(span.skip_cmdIndex, 0, 16);
+    const uint cmdIndex = BitExtract(span.skip_cmdIndex, 16, 16);
+    const CommandParams cmdParams = g_commandParams[cmdIndex];
 
     const bool antialias = BitTest(span.attrs, 0);
     const bool textured = BitTest(span.attrs, 1);
-    const uint cmdcolr = BitExtract(span.cmdpmodcolr, 16, 16);
+    const uint cmdcolr = BitExtract(cmdParams.cmdpmodcolr, 16, 16);
 
     LineStepper lineStepper;
     lineStepper.Setup(span.coord0, span.coord1, antialias);
@@ -627,12 +630,12 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         // Textured polygon
 
         TextureStepper uStepper;
-        const uint charSizeH = max(BitExtract(span.cmdsizesrca, 8, 6) << 3, 1);
+        const uint charSizeH = max(BitExtract(cmdParams.cmdsizesrca, 8, 6) << 3, 1);
         const bool flipH = BitTest(span.attrs, 2);
-        const uint colorMode = BitExtract(span.cmdpmodcolr, 3, 3);
-        const bool transparentPixelDisable = BitTest(span.cmdpmodcolr, 6);
-        const bool endCodesEnabled = !BitTest(span.cmdpmodcolr, 7);
-        const bool useHighSpeedShrink = BitTest(span.cmdpmodcolr, 12) && lineStepper.Length() < charSizeH - 1;
+        const uint colorMode = BitExtract(cmdParams.cmdpmodcolr, 3, 3);
+        const bool transparentPixelDisable = BitTest(cmdParams.cmdpmodcolr, 6);
+        const bool endCodesEnabled = !BitTest(cmdParams.cmdpmodcolr, 7);
+        const bool useHighSpeedShrink = BitTest(cmdParams.cmdpmodcolr, 12) && lineStepper.Length() < charSizeH - 1;
         const bool evenOddCoordSelect = BitTest(g_commonParams.displayParams, 6);
 
         int uStart = 0;
@@ -662,7 +665,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         }
 
         const uint texV = BitExtract(span.attrs, 3, 10);
-        const uint charAddr = BitExtract(span.cmdsizesrca, 16, 16) << 3u;
+        const uint charAddr = BitExtract(cmdParams.cmdsizesrca, 16, 16) << 3u;
         bool transparent;
         bool hasEndCode;
         ReadTexel(texU, texV, charAddr, charSizeH, colorMode, cmdcolr, spriteData, transparent, hasEndCode);
@@ -682,14 +685,14 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     }
 
     OutData data;
-    data.cmdpmod = span.cmdpmodcolr;
+    data.cmdIndex = cmdIndex;
 
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     // =========================================================================
     // Replace, Half-Luminance or Half-Transparency
 
-    const uint shadingMode = BitExtract(span.cmdpmodcolr, 0, 2);
-    const bool gouraudEnable = BitTest(span.cmdpmodcolr, 2);
+    const uint shadingMode = BitExtract(cmdParams.cmdpmodcolr, 0, 2);
+    const bool gouraudEnable = BitTest(cmdParams.cmdpmodcolr, 2);
 
     // Modify source color depending on the mode
     if (!pixel8Bits && (gouraudEnable || shadingMode == kColorBlendModeHalfLuminance)) {

@@ -853,26 +853,13 @@ struct Direct3D12VDPRenderer::Impl {
     /// @brief VDP1 polygon drawing parameters, appended to common rendering parameters in the polygon drawing shader.
     struct alignas(16) VDP1PolyDrawParams {
         HLSLuint numSpans; // Number of spans in the list
-
-        struct SysClip {     //  bits  use
-            HLSLuint h : 16; //  0-15  System clipping area width
-            HLSLuint v : 16; // 16-31  System clipping area height
-        } sysClip;
-        static_assert(sizeof(SysClip) == sizeof(HLSLuint));
-
-        struct UserClip {    //  bits  use
-            HLSLuint x : 16; //  0-15  User clipping area horizontal coordinate
-            HLSLuint y : 16; // 16-31  User clipping area vertical coordinate
-        };
-        static_assert(sizeof(UserClip) == sizeof(HLSLuint));
-        UserClip userClip0; // User clipping area top-left coordinate
-        UserClip userClip1; // User clipping area bottom-right coordinate
     };
 
     struct VDP1SpanParams {
-        HLSLint2 coord0; // Starting coordinates
-        HLSLint2 coord1; // Ending coordinates
-        HLSLuint skip;   // Initial skip steps
+        HLSLint2 coord0;        // Starting coordinates
+        HLSLint2 coord1;        // Ending coordinates
+        HLSLuint skip : 16;     // Initial skip steps
+        HLSLuint cmdIndex : 16; // Command parameters index
 
         struct Attributes {             //  bits  use
             HLSLuint antialias : 1;     //     0  Antialias line
@@ -887,6 +874,22 @@ struct Direct3D12VDPRenderer::Impl {
         // Gouraud only parameters
         HLSLuint3 gouraud0; // Starting gouraud value
         HLSLuint3 gouraud1; // Ending gouraud value
+    };
+
+    struct VDP1CommandParams {
+        struct SysClip {     //  bits  use
+            HLSLuint h : 16; //  0-15  System clipping area width
+            HLSLuint v : 16; // 16-31  System clipping area height
+        } sysClip;
+        static_assert(sizeof(SysClip) == sizeof(HLSLuint));
+
+        struct UserClip {    //  bits  use
+            HLSLuint x : 16; //  0-15  User clipping area horizontal coordinate
+            HLSLuint y : 16; // 16-31  User clipping area vertical coordinate
+        };
+        static_assert(sizeof(UserClip) == sizeof(HLSLuint));
+        UserClip userClip0; // User clipping area top-left coordinate
+        UserClip userClip1; // User clipping area bottom-right coordinate
 
         HLSLuint cmdpmod : 16; // CMDPMOD value
         HLSLuint cmdcolr : 16; // CMDCOLR value
@@ -902,6 +905,9 @@ struct Direct3D12VDPRenderer::Impl {
     /// @brief Maximum number of spans to send per batch.
     static constexpr uint32 kMaxVDP1Spans = 65535;
 
+    /// @brief Maximum number of commands to send per batch.
+    static constexpr uint32 kMaxVDP1Commands = 4096;
+
     /// @brief Maximum number of non-OIT fragments per dispatch.
     static constexpr uint32 kMaxVDP1FragmentsPerDispatch = 4194240;
 
@@ -913,6 +919,9 @@ struct Direct3D12VDPRenderer::Impl {
     // dispatch. We reserve zero as a special value indicating the previous dispatch's contents (or empty pixels).
     // Therefore, the absolute maximum number of spans that can be submitted per dispatch is 65535.
     static_assert(kMaxVDP1Spans <= 65535);
+
+    // The command index is a 16-bit number packed into one of the VDP1 spans fields.
+    static_assert(kMaxVDP1Commands <= 65535);
 
     // The absolute maximum limit for pixels per dispatch is dictated by the maximum number of compute dispatch groups.
     // Each group has 64 threads, as defined in the polygon drawing shader.
@@ -1810,6 +1819,15 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief Number of spans allocated so far.
         size_t cpuSpanCount = 0;
 
+        /// @brief Command parameters buffer.
+        D3D12Resource cmdParamsBuffer;
+        /// @brief Command parameters buffer SRV (offline).
+        DescriptorRange cmdParamsSRV;
+        /// @brief CPU-side command parameters buffer.
+        std::array<VDP1CommandParams, kMaxVDP1Commands> cpuCmdParams{};
+        /// @brief Number of commands allocated so far.
+        size_t cpuCmdCount = 0;
+
         /// @brief Internal sprite data output buffer.
         D3D12Resource internalSpriteOutBuffer;
         /// @brief Internal sprite data output buffer UAV (offline).
@@ -2268,7 +2286,7 @@ struct Direct3D12VDPRenderer::Impl {
             rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1PolyDrawParams)) /
                                                     sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(3, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddSRVs(4, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
                 .AddUAVs(1, 1); // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -2281,7 +2299,7 @@ struct Direct3D12VDPRenderer::Impl {
             rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1PolyDrawParams)) /
                                                     sizeof(uint32));
             rootSigBuilder.AddDescriptorTable()
-                .AddSRVs(3, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddSRVs(4, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
                 .AddUAVs(3, 1); // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
             if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
                 return util::ErrorMessage{fmt::format(
@@ -2412,6 +2430,39 @@ struct Direct3D12VDPRenderer::Impl {
                 };
                 device->CreateShaderResourceView(frameCtx.spanPrefixSumsBuffer.GetPointer(), &srvDesc,
                                                  frameCtx.spanPrefixSumsSRV.cpuHandle);
+            }
+
+            // Command parameters buffer
+            {
+                auto builder = frameCtx.cmdParamsBuffer.BufferBuilder(sizeof(frameCtx.cpuCmdParams));
+                if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                    return util::ErrorMessage{fmt::format(
+                        "Could not create VDP1 command parameters buffer #{}, error code {:X}", i, (uint32)hr)};
+                }
+                frameCtx.cmdParamsBuffer->SetName(fmt::format(L"[Ymir-VDP1] Command parameters buffer #{}", i).c_str());
+
+                barrierTracker.InitializeBuffer(
+                    frameCtx.cmdParamsBuffer.GetPointer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
+
+                if (!offlineHeapAlloc.Allocate(frameCtx.cmdParamsSRV)) {
+                    return util::ErrorMessage{
+                        fmt::format("Could not allocate VDP1 command parameters buffer SRV #{}", i)};
+                }
+                const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                    .Format = DXGI_FORMAT_UNKNOWN,
+                    .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                    .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                    .Buffer =
+                        {
+                            .FirstElement = 0,
+                            .NumElements = static_cast<UINT>(frameCtx.cpuCmdParams.size()),
+                            .StructureByteStride = sizeof(VDP1CommandParams),
+                            .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                        },
+                };
+                device->CreateShaderResourceView(frameCtx.cmdParamsBuffer.GetPointer(), &srvDesc,
+                                                 frameCtx.cmdParamsSRV.cpuHandle);
             }
 
             // Internal sprite data output buffer
@@ -2637,9 +2688,8 @@ struct Direct3D12VDPRenderer::Impl {
             // Polygon drawing descriptors (Copy and Shift variants)
             {
                 const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                    frameCtx.spanParamsSRV.cpuHandle,
-                    frameCtx.spanPrefixSumsSRV.cpuHandle,
-                    vdp1.vramSRV.cpuHandle,
+                    frameCtx.spanParamsSRV.cpuHandle,        frameCtx.spanPrefixSumsSRV.cpuHandle,
+                    frameCtx.cmdParamsSRV.cpuHandle,         vdp1.vramSRV.cpuHandle,
                     frameCtx.internalSpriteOutUAV.cpuHandle,
                 };
                 std::array<UINT, std::size(srcHandles)> srcSizes{};
@@ -2657,11 +2707,9 @@ struct Direct3D12VDPRenderer::Impl {
             // Polygon drawing descriptors (OIT variant only)
             {
                 const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                    frameCtx.spanParamsSRV.cpuHandle,
-                    frameCtx.spanPrefixSumsSRV.cpuHandle,
-                    vdp1.vramSRV.cpuHandle,
-                    frameCtx.oitListHeadsUAV.cpuHandle,
-                    frameCtx.oitFragmentsUAV.cpuHandle,
+                    frameCtx.spanParamsSRV.cpuHandle,   frameCtx.spanPrefixSumsSRV.cpuHandle,
+                    frameCtx.cmdParamsSRV.cpuHandle,    vdp1.vramSRV.cpuHandle,
+                    frameCtx.oitListHeadsUAV.cpuHandle, frameCtx.oitFragmentsUAV.cpuHandle,
                     frameCtx.oitCounterUAV.cpuHandle,
                 };
                 std::array<UINT, std::size(srcHandles)> srcSizes{};
@@ -3708,9 +3756,17 @@ struct Direct3D12VDPRenderer::Impl {
         }
     }
 
-    struct VDP1SpanData {
+    struct VDP1CommandData {
         VDP1Command::DrawMode mode;
         uint16 color;
+
+        uint32 charAddr;
+        VDP1Command::Size size;
+    };
+
+    struct VDP1SpanData {
+        uint16 cmdIndex;
+        VDP1Command::DrawMode mode;
         Color555 gouraud0;
         Color555 gouraud1;
 
@@ -3725,15 +3781,19 @@ struct Direct3D12VDPRenderer::Impl {
         FrameContext &frameCtx = frames.GetCurrentFrame();
         if (frameCtx.cpuSpanCount == 0) {
             // No spans to dispatch
+            frameCtx.cpuCmdCount = 0;
             return {};
         }
-        if (vdp1.currPolyDrawShaderIndex == -1) {
-            // No shader selected
-            return {};
-        }
-        // Clear spans even if we fail to submit them to avoid crashes on extreme cases.
+
+        // Clear counters even if we fail to submit them to avoid crashes on extreme cases.
         // Errors should never happen, however.
-        util::ScopeGuard sgClearSpans{[&] { frameCtx.cpuSpanCount = 0; }};
+        util::ScopeGuard sgClearCounters{[&] {
+            frameCtx.cpuSpanCount = 0;
+            frameCtx.cpuCmdCount = 0;
+        }};
+
+        // We should have a shader selected by now
+        assert(vdp1.currPolyDrawShaderIndex != -1);
 
         if (auto result = VDP1FlushVRAM(); !result) {
             devlog::warn<grp::dx12_vdp1>("VDP1 VRAM flush failed: {}", result.Error().message);
@@ -3745,6 +3805,8 @@ struct Direct3D12VDPRenderer::Impl {
         barrierTracker.TransitionBuffer(frameCtx.spanParamsBuffer.GetPointer(), D3D12_RESOURCE_STATE_COPY_DEST,
                                         D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST);
         barrierTracker.TransitionBuffer(frameCtx.spanPrefixSumsBuffer.GetPointer(), D3D12_RESOURCE_STATE_COPY_DEST,
+                                        D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST);
+        barrierTracker.TransitionBuffer(frameCtx.cmdParamsBuffer.GetPointer(), D3D12_RESOURCE_STATE_COPY_DEST,
                                         D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST);
         barrierTracker.Flush(cmdList);
 
@@ -3773,10 +3835,25 @@ struct Direct3D12VDPRenderer::Impl {
                                       size);
         }
 
+        // Upload commands
+        {
+            const size_t size = sizeof(VDP1CommandParams) * frameCtx.cpuCmdCount;
+            if (auto result = AllocateUploadBuffer(uploadBuffer, size, 4, alloc); !result) {
+                return util::ErrorMessage{fmt::format(
+                    "Failed to allocate upload buffer for VDP1 commands parameters: {}", result.Error().message)};
+            }
+            memcpy(alloc.data, &frameCtx.cpuCmdParams, size);
+
+            cmdList->CopyBufferRegion(frameCtx.cmdParamsBuffer.GetPointer(), 0, uploadBufferPtr, alloc.offset, size);
+        }
+
         barrierTracker.TransitionBuffer(frameCtx.spanParamsBuffer.GetPointer(),
                                         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                         D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
         barrierTracker.TransitionBuffer(frameCtx.spanPrefixSumsBuffer.GetPointer(),
+                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                        D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
+        barrierTracker.TransitionBuffer(frameCtx.cmdParamsBuffer.GetPointer(),
                                         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                         D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
         barrierTracker.TransitionBuffer(vdp1.vramBuffer.GetPointer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -3808,7 +3885,7 @@ struct Direct3D12VDPRenderer::Impl {
 
             // Reset atomic counter
             static constexpr UINT kClearValue[4] = {0, 0, 0, 0};
-            cmdList->ClearUnorderedAccessViewUint(frameCtx.polyDrawOITDescs.GetGPUHandle(5),
+            cmdList->ClearUnorderedAccessViewUint(frameCtx.polyDrawOITDescs.GetGPUHandle(6),
                                                   frameCtx.oitCounterUAV.cpuHandle,
                                                   frameCtx.oitCounterBuffer.GetPointer(), kClearValue, 0, nullptr);
 
@@ -3916,6 +3993,39 @@ struct Direct3D12VDPRenderer::Impl {
         }
     }
 
+    uint16 VDP1AddCommand(const VDP1CommandData &data, bool textured) {
+        FrameContext &frameCtx = frames.GetCurrentFrame();
+
+        // If list is full, flush it
+        if (frameCtx.cpuCmdCount + 1 >= kMaxVDP1Commands) {
+            VDP1SubmitSpans();
+        }
+
+        // Switch polygon drawing shader based on the current settings
+        VDP1SelectPolyDrawShader(data.mode);
+
+        const uint16 cmdIndex = frameCtx.cpuCmdCount++;
+        VDP1CommandParams &cmdParams = frameCtx.cpuCmdParams[cmdIndex];
+
+        const VDP1State &state = vdpState.state1;
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        cmdParams.userClip0.x = state.userClipX0;
+        cmdParams.userClip0.y = (state.userClipY0 << doubleV) | doubleV;
+        cmdParams.userClip1.x = state.userClipX1;
+        cmdParams.userClip1.y = (state.userClipY1 << doubleV) | doubleV;
+        cmdParams.sysClip.h = state.sysClipH;
+        cmdParams.sysClip.v = (state.sysClipV << doubleV) | doubleV;
+
+        cmdParams.cmdcolr = data.color;
+        cmdParams.cmdpmod = data.mode.u16;
+        if (textured) {
+            cmdParams.cmdsize = data.size.u16;
+            cmdParams.cmdsrca = data.charAddr >> 3u;
+        }
+
+        return cmdIndex;
+    }
+
     bool VDP1AddSpan(CoordS32 coord0, CoordS32 coord1, const VDP1SpanData &data, bool textured, bool antialias) {
         // Discard if completely out of bounds
         if (coord0.x() < 0 && coord1.x() < 0) {
@@ -3934,9 +4044,6 @@ struct Direct3D12VDPRenderer::Impl {
             return false;
         }
 
-        // Switch polygon drawing shader based on the current settings
-        VDP1SelectPolyDrawShader(data.mode);
-
         // Mark transparent mesh drawn if that's the case
         if (data.mode.meshEnable && enhancements.transparentMeshes) {
             vdp1.transparentMeshDrawn = true;
@@ -3948,7 +4055,7 @@ struct Direct3D12VDPRenderer::Impl {
         // Append span to list
         FrameContext &frameCtx = frames.GetCurrentFrame();
         VDP1SpanParams &spanParams = frameCtx.cpuSpanParams[frameCtx.cpuSpanCount];
-        const uint32 skip = line.SystemClip(vdpState.state1.sysClipH, sysClipV);
+        const uint32 skip = line.SystemClip(sysClipH, sysClipV);
         const uint32 length = line.Length();
 
         if (length == 0) {
@@ -3969,9 +4076,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         spanParams.coord0 = {x0, y0};
         spanParams.coord1 = {x1, y1};
-
-        spanParams.cmdcolr = data.color;
-        spanParams.cmdpmod = data.mode.u16;
+        spanParams.cmdIndex = data.cmdIndex;
 
         const uint32 dx = abs(x1 - x0);
         const uint32 dy = abs(y1 - y0);
@@ -3989,9 +4094,6 @@ struct Direct3D12VDPRenderer::Impl {
 
         spanParams.attrs.textured = textured;
         if (textured) {
-            spanParams.cmdsize = data.size.u16;
-            spanParams.cmdsrca = data.charAddr >> 3u;
-
             spanParams.attrs.texV = data.texV;
             spanParams.attrs.flipH = data.flipH;
             spanParams.attrs.endCodeIndex = data.endCodeIndex;
@@ -4191,15 +4293,23 @@ struct Direct3D12VDPRenderer::Impl {
         const CoordS32 coordC{xb, (yb << doubleV) + yAdd};
         const CoordS32 coordD{xa, (yb << doubleV) + yAdd};
 
-        VDP1SpanData data{
+        const VDP1CommandData cmdData{
             .mode = mode,
             .color = color,
+            .charAddr = charAddr,
+            .size = size,
+        };
+        const uint16 cmdIndex = VDP1AddCommand(cmdData, true);
+
+        VDP1SpanData spanData{
+            .cmdIndex = cmdIndex,
+            .mode = mode,
             .charAddr = charAddr,
             .size = size,
             .flipH = control.flipH,
         };
 
-        VDP1PlotTexturedQuad(data, cmdAddress, control, coordA, coordB, coordC, coordD);
+        VDP1PlotTexturedQuad(spanData, cmdAddress, control, coordA, coordB, coordC, coordD);
     }
 
     void VDP1Cmd_DrawScaledSprite(uint32 cmdAddress, VDP1Command::Control control) {
@@ -4298,15 +4408,23 @@ struct Direct3D12VDPRenderer::Impl {
         const CoordS32 coordC{qxc, (qyc << doubleV) + yAdd};
         const CoordS32 coordD{qxd, (qyd << doubleV) + yAdd};
 
-        VDP1SpanData data{
+        const VDP1CommandData cmdData{
             .mode = mode,
             .color = color,
+            .charAddr = charAddr,
+            .size = size,
+        };
+        const uint16 cmdIndex = VDP1AddCommand(cmdData, true);
+
+        VDP1SpanData spanData{
+            .cmdIndex = cmdIndex,
+            .mode = mode,
             .charAddr = charAddr,
             .size = size,
             .flipH = control.flipH,
         };
 
-        VDP1PlotTexturedQuad(data, cmdAddress, control, coordA, coordB, coordC, coordD);
+        VDP1PlotTexturedQuad(spanData, cmdAddress, control, coordA, coordB, coordC, coordD);
     }
 
     void VDP1Cmd_DrawDistortedSprite(uint32 cmdAddress, VDP1Command::Control control) {
@@ -4340,15 +4458,23 @@ struct Direct3D12VDPRenderer::Impl {
         const CoordS32 coordC{xc, (yc << doubleV) + yAddCD};
         const CoordS32 coordD{xd, (yd << doubleV) + yAddCD};
 
-        VDP1SpanData data{
+        const VDP1CommandData cmdData{
             .mode = mode,
             .color = color,
+            .charAddr = charAddr,
+            .size = size,
+        };
+        const uint16 cmdIndex = VDP1AddCommand(cmdData, true);
+
+        VDP1SpanData spanData{
+            .cmdIndex = cmdIndex,
+            .mode = mode,
             .charAddr = charAddr,
             .size = size,
             .flipH = control.flipH,
         };
 
-        VDP1PlotTexturedQuad(data, cmdAddress, control, coordA, coordB, coordC, coordD);
+        VDP1PlotTexturedQuad(spanData, cmdAddress, control, coordA, coordB, coordC, coordD);
     }
 
     void VDP1Cmd_DrawPolygon(uint32 cmdAddress) {
@@ -4392,9 +4518,15 @@ struct Direct3D12VDPRenderer::Impl {
             gouraudD.u16 = vdpState.mem1.ReadVRAM<uint16>(gouraudTable + 6u);
         }
 
-        VDP1SpanData data{
+        const VDP1CommandData cmdData{
             .mode = mode,
             .color = color,
+        };
+        const uint16 cmdIndex = VDP1AddCommand(cmdData, false);
+
+        VDP1SpanData spanData{
+            .cmdIndex = cmdIndex,
+            .mode = mode,
         };
 
         QuadStepper quad{coordA, coordB, coordC, coordD};
@@ -4435,11 +4567,11 @@ struct Direct3D12VDPRenderer::Impl {
             const CoordS32 coordR = quad.RightEdge().Coord();
 
             if (mode.gouraudEnable) {
-                data.gouraud0 = quad.LeftEdge().GouraudValue();
-                data.gouraud1 = quad.RightEdge().GouraudValue();
+                spanData.gouraud0 = quad.LeftEdge().GouraudValue();
+                spanData.gouraud1 = quad.RightEdge().GouraudValue();
             }
 
-            if (VDP1AddSpan(coordL, coordR, data, false, true)) {
+            if (VDP1AddSpan(coordL, coordR, spanData, false, true)) {
                 if (!linePlotted) {
                     linePlotted = true;
                     ++plottedSegmentsCount;
@@ -4494,31 +4626,37 @@ struct Direct3D12VDPRenderer::Impl {
             gouraudD.u16 = vdpState.mem1.ReadVRAM<uint16>(gouraudTable + 6u);
         }
 
-        VDP1SpanData data{
+        const VDP1CommandData cmdData{
             .mode = mode,
             .color = color,
         };
+        const uint16 cmdIndex = VDP1AddCommand(cmdData, false);
+
+        VDP1SpanData spanData{
+            .cmdIndex = cmdIndex,
+            .mode = mode,
+        };
 
         if (mode.gouraudEnable) {
-            data.gouraud0 = gouraudA;
-            data.gouraud1 = gouraudB;
+            spanData.gouraud0 = gouraudA;
+            spanData.gouraud1 = gouraudB;
         }
-        VDP1AddSpan(coordA, coordB, data, false, false);
+        VDP1AddSpan(coordA, coordB, spanData, false, false);
         if (mode.gouraudEnable) {
-            data.gouraud0 = gouraudB;
-            data.gouraud1 = gouraudC;
+            spanData.gouraud0 = gouraudB;
+            spanData.gouraud1 = gouraudC;
         }
-        VDP1AddSpan(coordB, coordC, data, false, false);
+        VDP1AddSpan(coordB, coordC, spanData, false, false);
         if (mode.gouraudEnable) {
-            data.gouraud0 = gouraudC;
-            data.gouraud1 = gouraudD;
+            spanData.gouraud0 = gouraudC;
+            spanData.gouraud1 = gouraudD;
         }
-        VDP1AddSpan(coordC, coordD, data, false, false);
+        VDP1AddSpan(coordC, coordD, spanData, false, false);
         if (mode.gouraudEnable) {
-            data.gouraud0 = gouraudD;
-            data.gouraud1 = gouraudA;
+            spanData.gouraud0 = gouraudD;
+            spanData.gouraud1 = gouraudA;
         }
-        VDP1AddSpan(coordD, coordA, data, false, false);
+        VDP1AddSpan(coordD, coordA, spanData, false, false);
     }
 
     void VDP1Cmd_DrawLine(uint32 cmdAddress) {
@@ -4538,18 +4676,24 @@ struct Direct3D12VDPRenderer::Impl {
         const CoordS32 coordA{xa, ya};
         const CoordS32 coordB{xb, yb};
 
-        VDP1SpanData data{
+        const VDP1CommandData cmdData{
             .mode = mode,
             .color = color,
+        };
+        const uint16 cmdIndex = VDP1AddCommand(cmdData, false);
+
+        VDP1SpanData spanData{
+            .cmdIndex = cmdIndex,
+            .mode = mode,
         };
 
         if (mode.gouraudEnable) {
             const uint32 gouraudTable = static_cast<uint32>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x1C)) << 3u;
-            data.gouraud0.u16 = vdpState.mem1.ReadVRAM<uint16>(gouraudTable + 0u);
-            data.gouraud1.u16 = vdpState.mem1.ReadVRAM<uint16>(gouraudTable + 2u);
+            spanData.gouraud0.u16 = vdpState.mem1.ReadVRAM<uint16>(gouraudTable + 0u);
+            spanData.gouraud1.u16 = vdpState.mem1.ReadVRAM<uint16>(gouraudTable + 2u);
         }
 
-        VDP1AddSpan(coordA, coordB, data, false, false);
+        VDP1AddSpan(coordA, coordB, spanData, false, false);
     }
 
     void VDP1Cmd_SetUserClipping(uint32 cmdAddress) {
@@ -4559,10 +4703,6 @@ struct Direct3D12VDPRenderer::Impl {
         state.userClipX1 = bit::extract<0, 9>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x14));
         state.userClipY0 = bit::extract<0, 8>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x0E));
         state.userClipY1 = bit::extract<0, 8>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x16));
-        vdp1.cpuPolyDrawParams.userClip0.x = state.userClipX0;
-        vdp1.cpuPolyDrawParams.userClip0.y = (state.userClipY0 << doubleV) | doubleV;
-        vdp1.cpuPolyDrawParams.userClip1.x = state.userClipX1;
-        vdp1.cpuPolyDrawParams.userClip1.y = (state.userClipY1 << doubleV) | doubleV;
     }
 
     void VDP1Cmd_SetSystemClipping(uint32 cmdAddress) {
@@ -4570,8 +4710,6 @@ struct Direct3D12VDPRenderer::Impl {
         const sint32 doubleV = vdp1.doubleV ? 1 : 0;
         state.sysClipH = bit::extract<0, 9>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x14));
         state.sysClipV = bit::extract<0, 8>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x16));
-        vdp1.cpuPolyDrawParams.sysClip.h = state.sysClipH;
-        vdp1.cpuPolyDrawParams.sysClip.v = (state.sysClipV << doubleV) | doubleV;
     }
 
     void VDP1Cmd_SetLocalCoordinates(uint32 cmdAddress) {
@@ -5687,13 +5825,6 @@ void Direct3D12VDPRenderer::PreSaveStateSync() {}
 void Direct3D12VDPRenderer::PostLoadStateSync() {
     m_impl->vdp1.vramDirty.SetAll();
     // TODO: make FBRAM dirty
-
-    m_impl->vdp1.cpuPolyDrawParams.userClip0.x = m_impl->vdpState.state1.userClipX0;
-    m_impl->vdp1.cpuPolyDrawParams.userClip0.y = m_impl->vdpState.state1.userClipY0;
-    m_impl->vdp1.cpuPolyDrawParams.userClip1.x = m_impl->vdpState.state1.userClipX1;
-    m_impl->vdp1.cpuPolyDrawParams.userClip1.y = m_impl->vdpState.state1.userClipY1;
-    m_impl->vdp1.cpuPolyDrawParams.sysClip.h = m_impl->vdpState.state1.sysClipH;
-    m_impl->vdp1.cpuPolyDrawParams.sysClip.v = m_impl->vdpState.state1.sysClipV;
 
     m_impl->VDP2CacheAllCRAMColors();
     m_impl->VDP2UpdateEnabledLayers();

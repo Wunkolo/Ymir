@@ -5,19 +5,22 @@
 
 struct PolyDrawParams {
     uint numSpans;
-    uint sysClip;
-    uint userClip0;
-    uint userClip1;
 };
 
 struct PolySpan {
     int2 coord0;
     int2 coord1;
-    uint skip;
+    uint skip_cmdIndex;
     uint attrs;
 
     uint3 gouraud0;
     uint3 gouraud1;
+};
+
+struct CommandParams {
+    uint sysClip;
+    uint userClip0;
+    uint userClip1;
 
     uint cmdpmodcolr;
     uint cmdsizesrca;
