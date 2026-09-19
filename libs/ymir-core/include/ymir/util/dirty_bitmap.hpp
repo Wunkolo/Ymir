@@ -32,8 +32,8 @@ struct DirtyBitmap {
         m_bitmap.fill(kAllBits);
         if constexpr ((numBits & kEntryMask) != 0) {
             m_bitmap.back() = kAllBits >> (-numBits & kEntryMask);
-            m_anySet = true;
         }
+        m_anySet = true;
     }
 
     /// @brief Resets all dirty bits.
