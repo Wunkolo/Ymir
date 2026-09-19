@@ -5215,6 +5215,7 @@ struct Direct3D12VDPRenderer::Impl {
             renderParams.base.vramDataOffset = packVRAMDataOffsets(bgParams.vramDataOffset);
             renderParams.base.specialColorCalcMode = static_cast<HLSLuint>(bgParams.specialColorCalcMode);
             renderParams.base.pageShift = {rotParams.pageShiftH, rotParams.pageShiftV};
+            renderParams.base.bitmapSize = {bgParams.bitmapSizeH, bgParams.bitmapSizeV};
             renderParams.base.bitmapBaseAddress = rotParams.bitmapBaseAddress;
             renderParams.base.windowParams.base.windowLogicAnd = bgParams.windowSet.logic == WindowLogic::And;
             renderParams.base.windowParams.base.window0Enable = bgParams.windowSet.enabled[0];
