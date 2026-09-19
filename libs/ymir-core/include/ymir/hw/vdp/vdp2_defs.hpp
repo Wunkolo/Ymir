@@ -55,6 +55,35 @@ inline constexpr auto kVDP2CRAMAddressMapping = [] {
     return addrs;
 }();
 
+// Reverse address mapping for RAMCTL.CRMD modes 2 and 3.
+inline constexpr auto kVDP2CRAMAddressReverseMapping = [] {
+    std::array<std::array<uint32, kVDP2CRAMSize>, 2> addrs{};
+    for (uint32 addr = 0; addr < kVDP2CRAMSize; addr++) {
+        addrs[0][addr] = addr;
+        addrs[1][addr] = (bit::extract<1, 10>(addr) << 2u) | (bit::extract<11>(addr) << 1u) | bit::extract<0>(addr);
+    }
+    return addrs;
+}();
+
+// Ensure the forward and reverse mappings are 1:1
+/*static_assert([] {
+    for (uint32 addr = 0; addr < kVDP2CRAMSize; addr++) {
+        for (uint32 i = 0; i < 2; i++) {
+            const uint32 fwd = kVDP2CRAMAddressMapping[i][addr];
+            const uint32 rev = kVDP2CRAMAddressReverseMapping[i][addr];
+            const uint32 fwdRev = kVDP2CRAMAddressReverseMapping[i][fwd];
+            const uint32 revFwd = kVDP2CRAMAddressMapping[i][rev];
+            if (fwdRev != revFwd) {
+                return false;
+            }
+            if (fwdRev != addr) {
+                return false;
+            }
+        }
+    }
+    return true;
+}());*/
+
 // -----------------------------------------------------------------------------
 // Display phases
 

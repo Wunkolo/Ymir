@@ -5014,6 +5014,7 @@ struct Direct3D12VDPRenderer::Impl {
         case 2: [[fallthrough]]; // RGB 8:8:8, full CRAM
         case 3: [[fallthrough]]; // RGB 8:8:8, full CRAM
         default: {
+            address = vdpState.mem2.UnmapCRAMAddress<uint8>(address);
             const auto value = vdpState.mem2.ReadCRAM<uint32>(address & ~3u);
             const Color888 color8{.u32 = value};
             ColorR8G8B8A8 &color = colorCache[address >> 2u];
