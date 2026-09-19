@@ -906,7 +906,7 @@ uint4 DrawNBG(uint2 pos, // pixel coordinates
                 scrollPos.x -= 8;
             } else {
                 // Left edge of the screen - read rightmost character from previous row
-                scrollPos.x += displayResH - 8;
+                scrollPos.x += displayResH;
                 if (pos.y >= 8) {
                     // Not at top edge of the screen - read previous row
                     scrollPos.y -= 8;
