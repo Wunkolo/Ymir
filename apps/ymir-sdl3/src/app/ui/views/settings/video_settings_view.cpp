@@ -36,7 +36,7 @@ void VideoSettingsView::Display() {
 
     // -----------------------------------------------------------------------------------------------------------------
 
-    ImGui::PushFont(m_context.fonts.sansSerif.bold, m_context.fontSizes.medium);
+    ImGui::PushFont(m_context.fonts.sansSerif.bold, m_context.fontSizes.large);
     ImGui::SeparatorText("Software renderer");
     ImGui::PopFont();
 
