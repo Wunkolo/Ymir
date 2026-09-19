@@ -1022,6 +1022,8 @@ struct Direct3D12VDPRenderer::Impl {
         size_t currOutputMergerShaderIndex = -1;
         // Set to true if any transparent mesh polygon was drawn
         bool transparentMeshDrawn = false;
+        // Whether to double vertical coordinates when drawing VDP1 sprites
+        bool doubleV = false;
     } vdp1;
 
     /// @brief Constructs a polygon drawing shader index from its variant options.
@@ -3680,6 +3682,13 @@ struct Direct3D12VDPRenderer::Impl {
         VDP1SubmitSpans();
     }
 
+    void VDP1BeginFrame() {
+        const VDP1Regs &regs1 = vdpState.regs1;
+        const VDP2Regs &regs2 = vdpState.regs2;
+        vdp1.doubleV =
+            enhancements.deinterlace && regs2.TVMD.LSMDn == InterlaceMode::DoubleDensity && !regs1.dblInterlaceEnable;
+    }
+
     void VDP1ExecuteCommand(uint32 cmdAddress, VDP1Command::Control control) {
         switch (control.command) {
         case VDP1Command::CommandType::DrawNormalSprite: VDP1Cmd_DrawNormalSprite(cmdAddress, control); break;
@@ -3849,7 +3858,7 @@ struct Direct3D12VDPRenderer::Impl {
             const uint32 mergeH = regs1.fbSizeV;
             const uint32 mergeZ = regs2.TVMD.IsInterlaced() && enhancements.deinterlace ? 2 : 1;
 
-            // Dispatch transparent mesh variant if any such polygons were drawn
+            // Dispatch transparent mesh variant of the output merger shader if any such polygons were drawn
             if (vdp1.transparentMeshDrawn) {
                 vdp1.transparentMeshDrawn = false;
                 cmdList->SetPipelineState(frameCtx.outputMergerPSOs[vdp1.currOutputMergerShaderIndex | 1].GetPointer());
@@ -3919,7 +3928,8 @@ struct Direct3D12VDPRenderer::Impl {
         if (coord0.x() > sysClipH && coord1.x() > sysClipH) {
             return false;
         }
-        const sint32 sysClipV = vdpState.state1.sysClipV;
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        const sint32 sysClipV = (vdpState.state1.sysClipV << doubleV) | doubleV;
         if (coord0.y() > sysClipV && coord1.y() > sysClipV) {
             return false;
         }
@@ -3938,7 +3948,7 @@ struct Direct3D12VDPRenderer::Impl {
         // Append span to list
         FrameContext &frameCtx = frames.GetCurrentFrame();
         VDP1SpanParams &spanParams = frameCtx.cpuSpanParams[frameCtx.cpuSpanCount];
-        const uint32 skip = line.SystemClip(vdpState.state1.sysClipH, vdpState.state1.sysClipV);
+        const uint32 skip = line.SystemClip(vdpState.state1.sysClipH, sysClipV);
         const uint32 length = line.Length();
 
         if (length == 0) {
@@ -4173,10 +4183,13 @@ struct Direct3D12VDPRenderer::Impl {
         const sint32 xb = xa + std::max(charSizeH, 1u) - 1u; // right X
         const sint32 yb = ya + std::max(charSizeV, 1u) - 1u; // bottom Y
 
-        const CoordS32 coordA{xa, ya};
-        const CoordS32 coordB{xb, ya};
-        const CoordS32 coordC{xb, yb};
-        const CoordS32 coordD{xa, yb};
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        const sint32 yAdd = enhancements.deinterlace ? doubleV : 0;
+
+        const CoordS32 coordA{xa, ya << doubleV};
+        const CoordS32 coordB{xb, ya << doubleV};
+        const CoordS32 coordC{xb, (yb << doubleV) + yAdd};
+        const CoordS32 coordD{xa, (yb << doubleV) + yAdd};
 
         VDP1SpanData data{
             .mode = mode,
@@ -4277,10 +4290,13 @@ struct Direct3D12VDPRenderer::Impl {
         qxd += state.localCoordX;
         qyd += state.localCoordY;
 
-        const CoordS32 coordA{qxa, qya};
-        const CoordS32 coordB{qxb, qyb};
-        const CoordS32 coordC{qxc, qyc};
-        const CoordS32 coordD{qxd, qyd};
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        const sint32 yAdd = enhancements.deinterlace ? doubleV : 0;
+
+        const CoordS32 coordA{qxa, qya << doubleV};
+        const CoordS32 coordB{qxb, qyb << doubleV};
+        const CoordS32 coordC{qxc, (qyc << doubleV) + yAdd};
+        const CoordS32 coordD{qxd, (qyd << doubleV) + yAdd};
 
         VDP1SpanData data{
             .mode = mode,
@@ -4313,10 +4329,16 @@ struct Direct3D12VDPRenderer::Impl {
         const sint32 xd = bit::sign_extend<13>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x18)) + state.localCoordX;
         const sint32 yd = bit::sign_extend<13>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x1A)) + state.localCoordY;
 
-        const CoordS32 coordA{xa, ya};
-        const CoordS32 coordB{xb, yb};
-        const CoordS32 coordC{xc, yc};
-        const CoordS32 coordD{xd, yd};
+        const bool isRegularRect = (xa == xd) && (xb == xc) && (ya == yb) && (yc == yd);
+
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        const sint32 yAddAB = enhancements.deinterlace && isRegularRect && (ya >= yc) ? doubleV : 0;
+        const sint32 yAddCD = enhancements.deinterlace && isRegularRect && (ya < yc) ? doubleV : 0;
+
+        const CoordS32 coordA{xa, (ya << doubleV) + yAddAB};
+        const CoordS32 coordB{xb, (yb << doubleV) + yAddAB};
+        const CoordS32 coordC{xc, (yc << doubleV) + yAddCD};
+        const CoordS32 coordD{xd, (yd << doubleV) + yAddCD};
 
         VDP1SpanData data{
             .mode = mode,
@@ -4348,10 +4370,16 @@ struct Direct3D12VDPRenderer::Impl {
         const sint32 yd = bit::sign_extend<13>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x1A)) + state.localCoordY;
         const uint32 gouraudTable = static_cast<uint32>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x1C)) << 3u;
 
-        const CoordS32 coordA{xa, ya};
-        const CoordS32 coordB{xb, yb};
-        const CoordS32 coordC{xc, yc};
-        const CoordS32 coordD{xd, yd};
+        const bool isRegularRect = (xa == xd) && (xb == xc) && (ya == yb) && (yc == yd);
+
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        const sint32 yAddAB = enhancements.deinterlace && isRegularRect && (ya >= yc) ? doubleV : 0;
+        const sint32 yAddCD = enhancements.deinterlace && isRegularRect && (ya < yc) ? doubleV : 0;
+
+        const CoordS32 coordA{xa, (ya << doubleV) + yAddAB};
+        const CoordS32 coordB{xb, (yb << doubleV) + yAddAB};
+        const CoordS32 coordC{xc, (yc << doubleV) + yAddCD};
+        const CoordS32 coordD{xd, (yd << doubleV) + yAddCD};
 
         Color555 gouraudA;
         Color555 gouraudB;
@@ -4444,10 +4472,16 @@ struct Direct3D12VDPRenderer::Impl {
         const sint32 yd = bit::sign_extend<13>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x1A)) + state.localCoordY;
         const uint32 gouraudTable = static_cast<uint32>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x1C)) << 3u;
 
-        const CoordS32 coordA{xa, ya};
-        const CoordS32 coordB{xb, yb};
-        const CoordS32 coordC{xc, yc};
-        const CoordS32 coordD{xd, yd};
+        const bool isRegularRect = (xa == xd) && (xb == xc) && (ya == yb) && (yc == yd);
+
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
+        const sint32 yAddAB = enhancements.deinterlace && isRegularRect && (ya >= yc) ? doubleV : 0;
+        const sint32 yAddCD = enhancements.deinterlace && isRegularRect && (ya < yc) ? doubleV : 0;
+
+        const CoordS32 coordA{xa, (ya << doubleV) + yAddAB};
+        const CoordS32 coordB{xb, (yb << doubleV) + yAddAB};
+        const CoordS32 coordC{xc, (yc << doubleV) + yAddCD};
+        const CoordS32 coordD{xd, (yd << doubleV) + yAddCD};
 
         Color555 gouraudA;
         Color555 gouraudB;
@@ -4520,22 +4554,24 @@ struct Direct3D12VDPRenderer::Impl {
 
     void VDP1Cmd_SetUserClipping(uint32 cmdAddress) {
         VDP1State &state = vdpState.state1;
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
         state.userClipX0 = bit::extract<0, 9>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x0C));
         state.userClipX1 = bit::extract<0, 9>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x14));
         state.userClipY0 = bit::extract<0, 8>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x0E));
         state.userClipY1 = bit::extract<0, 8>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x16));
         vdp1.cpuPolyDrawParams.userClip0.x = state.userClipX0;
-        vdp1.cpuPolyDrawParams.userClip0.y = state.userClipY0;
+        vdp1.cpuPolyDrawParams.userClip0.y = (state.userClipY0 << doubleV) | doubleV;
         vdp1.cpuPolyDrawParams.userClip1.x = state.userClipX1;
-        vdp1.cpuPolyDrawParams.userClip1.y = state.userClipY1;
+        vdp1.cpuPolyDrawParams.userClip1.y = (state.userClipY1 << doubleV) | doubleV;
     }
 
     void VDP1Cmd_SetSystemClipping(uint32 cmdAddress) {
         VDP1State &state = vdpState.state1;
+        const sint32 doubleV = vdp1.doubleV ? 1 : 0;
         state.sysClipH = bit::extract<0, 9>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x14));
         state.sysClipV = bit::extract<0, 8>(vdpState.mem1.ReadVRAM<uint16>(cmdAddress + 0x16));
         vdp1.cpuPolyDrawParams.sysClip.h = state.sysClipH;
-        vdp1.cpuPolyDrawParams.sysClip.v = state.sysClipV;
+        vdp1.cpuPolyDrawParams.sysClip.v = (state.sysClipV << doubleV) | doubleV;
     }
 
     void VDP1Cmd_SetLocalCoordinates(uint32 cmdAddress) {
@@ -5759,7 +5795,9 @@ void Direct3D12VDPRenderer::VDP1SwapFramebuffer() {
     Callbacks.VDP1FramebufferSwap();
 }
 
-void Direct3D12VDPRenderer::VDP1BeginFrame() {}
+void Direct3D12VDPRenderer::VDP1BeginFrame() {
+    m_impl->VDP1BeginFrame();
+}
 
 void Direct3D12VDPRenderer::VDP1ExecuteCommand(uint32 cmdAddress, VDP1Command::Control control) {
     m_impl->VDP1ExecuteCommand(cmdAddress, control);

@@ -52,22 +52,22 @@ static const uint kVDP1MeshFBOffset = kVDP1FBRAMSize * 2 * 2;
 // ---------------------------------------------------------------------------------------------------------------------
 // Utilities
 
-uint ReadSprite8(uint address) {
-    address += kSpriteFBBaseOffset;
+uint ReadSprite8(uint address, uint field) {
+    address += kSpriteFBBaseOffset + field * kDeinterlaceFBBaseOffset;
     return BitExtract(g_spriteFB.Load(address & ~3), (address & 3) * 8, 8);
 }
 
-uint ReadSprite16(uint address) {
-    address += kSpriteFBBaseOffset;
+uint ReadSprite16(uint address, uint field) {
+    address += kSpriteFBBaseOffset + field * kDeinterlaceFBBaseOffset;
     return BitExtract(g_spriteFB.Load(address & ~3), (address & 2) * 8, 16);
 }
 
-uint ReadMesh8(uint address) {
-    return ReadSprite8(kVDP1MeshFBOffset + address);
+uint ReadMesh8(uint address, uint field) {
+    return ReadSprite8(kVDP1MeshFBOffset + address, field);
 }
 
-uint ReadMesh16(uint address) {
-    return ReadSprite16(kVDP1MeshFBOffset + address);
+uint ReadMesh16(uint address, uint field) {
+    return ReadSprite16(kVDP1MeshFBOffset + address, field);
 }
 
 uint GetY(uint y) {
@@ -231,7 +231,7 @@ uint GetSpecialPattern(uint rawData, uint colorDataBits) {
     }
 }
 
-SpriteData FetchSpriteData(uint fbAddr, bool meshLayer) {
+SpriteData FetchSpriteData(uint fbAddr, uint field, bool meshLayer) {
     // Adjust offset based on VDP1 data size.
     // The majority of games actually set the sprite readout size to match the VDP1 sprite data size, but there's
     // *always* an exception...
@@ -239,13 +239,13 @@ SpriteData FetchSpriteData(uint fbAddr, bool meshLayer) {
     // 16-bit VDP1 data vs. 8-bit readout: I Love Donald Duck
     uint rawData;
     if (pixel8Bits) {
-        rawData = meshLayer ? ReadMesh8(fbAddr) : ReadSprite8(fbAddr);
+        rawData = meshLayer ? ReadMesh8(fbAddr, field) : ReadSprite8(fbAddr, field);
         if (type < 8 && (!meshLayer || rawData != 0)) {
             rawData |= 0xFF00;
         }
     } else {
         fbAddr <<= 1;
-        rawData = meshLayer ? ReadMesh16(fbAddr) : ReadSprite16(fbAddr);
+        rawData = meshLayer ? ReadMesh16(fbAddr, field) : ReadSprite16(fbAddr, field);
     }
 
     // Sprite types 0-7 are 16-bit, 8-15 are 8-bit
@@ -402,7 +402,7 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
     SpriteOutput output = { kTransparentPixel, 0, false, false, false };
 
     uint2 spritePos;
-    uint baseFBAddr = 0;
+    uint field = 0;
     if (rotate) {
         spritePos = CalcRotationSpriteCoordinates(pos);
     } else {
@@ -413,20 +413,20 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
             spritePos.x >>= 1;
         }
         if (deinterlace && interlaceMode >= kInterlaceModeSingleDensity) {
-            if (dblInterlaceEnable && (spritePos.y & 1) == dblInterlaceDrawLine) {
-                baseFBAddr = kDeinterlaceFBBaseOffset;
+            if (interlaceMode == kInterlaceModeDoubleDensity && (spritePos.y & 1)) {
+                field = 1;
             }
             spritePos.y >>= 1;
         }
     }
-    const uint fbAddr = baseFBAddr + spritePos.x + spritePos.y * fbSizeH;
+    const uint fbAddr = spritePos.x + spritePos.y * fbSizeH;
 
     if (InsideWindows(pos)) {
         return output;
     }
 
     if (mixedFormat) {
-        const uint spriteDataValue = meshLayer ? ReadMesh16(fbAddr << 1) : ReadSprite16(fbAddr << 1);
+        const uint spriteDataValue = meshLayer ? ReadMesh16(fbAddr << 1, field) : ReadSprite16(fbAddr << 1, field);
         if (BitTest(spriteDataValue, 15)) {
             // RGB data
 
@@ -455,7 +455,7 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
     }
 
     // Palette data
-    const SpriteData spriteData = FetchSpriteData(fbAddr, meshLayer);
+    const SpriteData spriteData = FetchSpriteData(fbAddr, field, meshLayer);
 
     // Handle sprite window
     const bool spriteWindowEnabled = BitTest(g_commonParams.spriteParams, 20);

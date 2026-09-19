@@ -6,7 +6,9 @@
 #include "util/data_ops.hlsli"
 
 // Shader specialization macros:
-// - POLYSPEC_TRANSPARENT_MESH: 0=checkerboard mesh; 1=transparent mesh
+// - POLYSPEC_TRANSPARENT_MESH:
+//     0 = checkerboard mesh
+//     1 = transparent mesh
 // - POLYSPEC_SHADING_MODE:
 //     0 = Copy (Replace, Half-Luminance)
 //     1 = Right-shift (Shadow)
@@ -90,7 +92,7 @@ static const uint2 fbSize = uint2(
 static const bool pixel8Bits = BitTest(g_commonParams.displayParams, 2);
 static const bool doubleDensity = BitTest(g_commonParams.displayParams, 3);
 static const bool dblInterlaceEnable = BitTest(g_commonParams.displayParams, 4);
-static const bool dblInterlaceDrawLine = BitTest(g_commonParams.displayParams, 5);
+static const uint dblInterlaceDrawLine = BitExtract(g_commonParams.displayParams, 5, 1);
 static const bool evenOddCoordSelect = BitTest(g_commonParams.displayParams, 6);
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
@@ -98,14 +100,6 @@ static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
 static const uint2 sysClip = uint2(
     BitExtract(g_polyDrawParams.sysClip, 0, 16),
     BitExtract(g_polyDrawParams.sysClip, 16, 16)
-);
-static const uint2 userClip0 = uint2(
-    BitExtract(g_polyDrawParams.userClip0, 0, 16),
-    BitExtract(g_polyDrawParams.userClip0, 16, 16)
-);
-static const uint2 userClip1 = uint2(
-    BitExtract(g_polyDrawParams.userClip1, 0, 16),
-    BitExtract(g_polyDrawParams.userClip1, 16, 16)
 );
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -495,6 +489,29 @@ struct OutData {
 };
 
 void WriteOutput(int2 coord, OutData data) {
+    // Bounds check
+    if (any(coord < 0) || any(coord > sysClip)) {
+        return;
+    }
+
+    // Clip to user area
+    // TODO: need to refer to a command list instead
+    /*const bool userClippingEnable = BitTest(data.cmdpmod, 10);
+    if (userClippingEnable) {
+        const bool clippingMode = BitTest(data.cmdpmod, 9);
+        const uint2 userClip0 = uint2(
+            BitExtract(g_polyDrawParams.userClip0, 0, 16),
+            BitExtract(g_polyDrawParams.userClip0, 16, 16)
+        );
+        const uint2 userClip1 = uint2(
+            BitExtract(g_polyDrawParams.userClip1, 0, 16),
+            BitExtract(g_polyDrawParams.userClip1, 16, 16)
+        );
+        if (any(coord < userClip0) || any(coord > userClip1) != clippingMode) {
+            return;
+        }
+    }*/
+
     // Mesh checkerboard test
     const bool meshEnable = BitTest(data.cmdpmod, 8);
     if (!POLYSPEC_TRANSPARENT_MESH && meshEnable && BitTest(coord.x ^ coord.y, 0)) {
@@ -509,17 +526,17 @@ void WriteOutput(int2 coord, OutData data) {
 #endif
 
     // Interlace line selection
-    if (dblInterlaceEnable) {
-        if ((coord.y & 1) != dblInterlaceDrawLine) {
-            if (!deinterlace) {
-                return;
-            }
+    if (!deinterlace && doubleDensity && dblInterlaceEnable && (coord.y & 1) != dblInterlaceDrawLine) {
+        return;
+    }
+    if (deinterlace && doubleDensity && (coord.y & 1) != 0) {
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
-            fbOffset += kVDP1FBRAMSize;
+        fbOffset += kVDP1FBRAMSize;
 #else
-            outOffset += fbSize.x * fbSize.y;
+        outOffset += fbSize.x * fbSize.y;
 #endif
-        }
+    }
+    if ((deinterlace && doubleDensity) || dblInterlaceEnable) {
         coord.y >>= 1;
     }
 

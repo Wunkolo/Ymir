@@ -14,7 +14,7 @@ RWByteAddressBuffer g_fbramOut : register(u1);
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
 
-static const bool dblInterlaceEnable = BitTest(g_commonParams.displayParams, 4);
+static const bool doubleDensity = BitTest(g_commonParams.displayParams, 3);
 static const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
 static const uint drawFBOffset = drawFB * kVDP1FBSize;
 
@@ -72,7 +72,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     if (transparentMeshes) {
         g_fbramOut.Store(address + kVDP1FBRAMSize * 2, 0);
     }
-    if (deinterlace && dblInterlaceEnable) {
+    if (deinterlace && doubleDensity) {
         g_fbramOut.Store(address + kVDP1FBRAMSize, value);
         if (transparentMeshes) {
             g_fbramOut.Store(address + kVDP1FBRAMSize * 3, 0);

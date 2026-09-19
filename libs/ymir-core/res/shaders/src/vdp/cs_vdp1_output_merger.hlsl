@@ -5,7 +5,9 @@
 #include "util/data_ops.hlsli"
 
 // Shader specialization macros:
-// - POLYSPEC_TRANSPARENT_MESH: 0=checkerboard mesh; 1=transparent mesh
+// - POLYSPEC_TRANSPARENT_MESH:
+//     0 = main buffer
+//     1 = transparent mesh buffer
 // - POLYSPEC_MERGE_MODE:
 //     0 = Copy (Replace, Half-Luminance)
 //     1 = Right-shift (Shadow)
@@ -13,6 +15,7 @@
 //
 // Implementation notes:
 // - Works on 32-bit units at a time
+// - The Z ID selects the field to draw for deinterlaced rendering (0=main, 1=alternate)
 
 #define POLYSPEC_SHADING_MODE_COPY  0
 #define POLYSPEC_SHADING_MODE_SHIFT 1
@@ -48,12 +51,7 @@ static const uint2 fbSize = uint2(
     256u << BitExtract(g_commonParams.displayParams, 1, 1)
 );
 static const bool pixel8Bits = BitTest(g_commonParams.displayParams, 2);
-static const bool doubleDensity = BitTest(g_commonParams.displayParams, 3);
-static const bool dblInterlaceEnable = BitTest(g_commonParams.displayParams, 4);
-static const bool dblInterlaceDrawLine = BitTest(g_commonParams.displayParams, 5);
 static const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
-
-static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
 
 static const uint fbOffset = drawFB * kVDP1FBSize;
 
