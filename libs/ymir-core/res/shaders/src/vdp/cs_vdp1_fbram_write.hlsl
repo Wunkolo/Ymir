@@ -1,5 +1,6 @@
 #include "vdp1_defs.hlsli"
 #include "vdp1_common_params.hlsli"
+#include "vdp1_write_params.hlsli"
 
 #include "util/bit_ops.hlsli"
 
@@ -11,12 +12,6 @@ cbuffer CommonRenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
     FBRAMWriteParams g_writeParams;
 }
-
-struct FBRAMWrite {
-    uint address;
-    uint andMask;
-    uint orMask;
-};
 
 StructuredBuffer<FBRAMWrite> g_fbramWrites : register(t1);
 
