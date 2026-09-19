@@ -48,8 +48,8 @@
 
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
-#define POLYSPEC_TRANSPARENT_MESH 0
-#define POLYSPEC_SHADING_MODE     2
+#define POLYSPEC_TRANSPARENT_MESH 1
+#define POLYSPEC_SHADING_MODE     0
 #endif
 
 cbuffer RenderParamsBuffer : register(b0) {
@@ -524,6 +524,12 @@ void WriteOutput(int2 coord, OutData data) {
     }
 
     outOffset += coord.y * fbSize.x + coord.x;
+
+#if POLYSPEC_TRANSPARENT_MESH
+    if (meshEnable) {
+        outOffset += fbSize.x * fbSize.y * 2;
+    }
+#endif
 
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY
     // -------------------------------------------------------------------------
