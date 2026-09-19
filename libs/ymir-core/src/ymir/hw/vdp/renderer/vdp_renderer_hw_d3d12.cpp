@@ -2055,6 +2055,12 @@ struct Direct3D12VDPRenderer::Impl {
             return {};
         }
 
+        void WaitForLatestFrame(D3D12Fence &fence, D3D12CommandQueue &cmdQueue) {
+            if (fence.GetCompletedValue() < currFenceValue) {
+                fence.Wait(INFINITE, currFenceValue);
+            }
+        }
+
         FrameContext &operator[](size_t index) {
             return frames[index];
         }
@@ -3729,7 +3735,7 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     void VDP1SyncFB() {
-        // TODO: wait until VDP1 rendering has caught up
+        frames.WaitForLatestFrame(computeFence, cmdQueue);
     }
 
     void VDP1DebugSyncFB() {
