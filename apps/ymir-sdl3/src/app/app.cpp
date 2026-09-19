@@ -2622,11 +2622,11 @@ void App::RunEmulator() {
 
                     if (ImGui::BeginMenu("SCU")) {
                         auto &windowSet = m_windowManagerService.SCUWindowSet();
-                        ImGui::MenuItem("Registers", nullptr, windowSet.regs.Open);
-                        ImGui::MenuItem("DSP", nullptr, windowSet.dsp.Open);
-                        ImGui::MenuItem("DMA", nullptr, windowSet.dma.Open);
-                        ImGui::MenuItem("DMA trace", nullptr, windowSet.dmaTrace.Open);
-                        ImGui::MenuItem("Interrupt trace", nullptr, windowSet.intrTrace.Open);
+                        ImGui::MenuItem("Registers", nullptr, &windowSet.regs.Open);
+                        ImGui::MenuItem("DSP", nullptr, &windowSet.dsp.Open);
+                        ImGui::MenuItem("DMA", nullptr, &windowSet.dma.Open);
+                        ImGui::MenuItem("DMA trace", nullptr, &windowSet.dmaTrace.Open);
+                        ImGui::MenuItem("Interrupt trace", nullptr, &windowSet.intrTrace.Open);
                         ImGui::EndMenu();
                     }
 
