@@ -951,7 +951,7 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief VRAM dirty bitmap.
         util::DirtyBitmap<kVRAMDirtyBitmapSize> vramDirty;
 
-        /// @brief FBRAM buffer.
+        /// @brief FBRAM buffer. Twice as large to store the deinterlaced field as well.
         D3D12Resource fbramBuffer;
         /// @brief FBRAM buffer SRV (offline).
         DescriptorRange fbramSRV;
@@ -2140,7 +2140,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // VDP1 FBRAM buffer
         {
-            auto builder = vdp1.fbramBuffer.BufferBuilder(kVDP1FBRAMSize * 2);
+            auto builder = vdp1.fbramBuffer.BufferBuilder(kVDP1FBRAMSize * 2 * 2);
             builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -2162,7 +2162,7 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = kVDP1FBRAMSize * 2 / sizeof(uint32),
+                        .NumElements = kVDP1FBRAMSize * 2 * 2 / sizeof(uint32),
                         .StructureByteStride = 0,
                         .Flags = D3D12_BUFFER_SRV_FLAG_RAW,
                     },
@@ -2178,7 +2178,7 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = kVDP1FBRAMSize * 2 / sizeof(uint32),
+                        .NumElements = kVDP1FBRAMSize * 2 * 2 / sizeof(uint32),
                         .StructureByteStride = 0,
                         .CounterOffsetInBytes = 0,
                         .Flags = D3D12_BUFFER_UAV_FLAG_RAW,
@@ -3827,7 +3827,7 @@ struct Direct3D12VDPRenderer::Impl {
             cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
                                                   &vdp1.cpuCommonRenderParams, 0);
             cmdList->SetComputeRootDescriptorTable(1, descs.gpuHandle);
-            cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, 1);
+            cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, enhancements.deinterlace ? 2 : 1);
         }
 
         return {};

@@ -92,9 +92,6 @@ static const bool doubleDensity = BitTest(g_commonParams.displayParams, 3);
 static const bool dblInterlaceEnable = BitTest(g_commonParams.displayParams, 4);
 static const bool dblInterlaceDrawLine = BitTest(g_commonParams.displayParams, 5);
 static const bool evenOddCoordSelect = BitTest(g_commonParams.displayParams, 6);
-static const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
-
-static const uint fbOffset = drawFB * kVDP1FBRAMSize;
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
 
@@ -490,14 +487,62 @@ void ReadTexel(uint u, uint v, uint charAddress, uint charSizeH, uint colorMode,
     }
 }
 
-// Determines if the pixel at the given coordinate should be culled in the mesh checkerboard pattern.
-bool IsMeshCulled(int2 coord) {
-    return BitTest(coord.x ^ coord.y, 0);
-}
+struct OutData {
+    uint cmdpmod;
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
+    uint value;
+#endif
+};
 
-#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
+void WriteOutput(int2 coord, OutData data) {
+    // Mesh checkerboard test
+    const bool meshEnable = BitTest(data.cmdpmod, 8);
+    if (!POLYSPEC_TRANSPARENT_MESH && meshEnable && BitTest(coord.x ^ coord.y, 0)) {
+        return;
+    }
 
-void WriteOutput(uint offset, uint value) {
+    uint outOffset = 0;
+
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
+    const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
+    uint fbOffset = drawFB * kVDP1FBRAMSize;
+#endif
+
+    // Interlace line selection
+    if (dblInterlaceEnable) {
+        if ((coord.y & 1) != dblInterlaceDrawLine) {
+            if (!deinterlace) {
+                return;
+            }
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
+            fbOffset += 2 * kVDP1FBRAMSize;
+#else
+            outOffset = fbSize.x * fbSize.y;
+#endif
+        }
+        coord.y >>= 1;
+    }
+
+    outOffset += coord.y * fbSize.x + coord.x;
+
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY
+    // -------------------------------------------------------------------------
+    // Replace or Half-Luminance
+
+    // Output pixel with the highest sequence number
+
+    InterlockedMax(g_internalSpriteOut[outOffset], data.value);
+
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_SHIFT
+    // -------------------------------------------------------------------------
+    // Shadow
+
+    // Output value is the number of shifts to apply to underlying pixels.
+    // Output merger applies the shift to pixels with MSB=1.
+
+    InterlockedAdd(g_internalSpriteOut[outOffset], 1);
+
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     // -------------------------------------------------------------------------
     // Half-Transparency
 
@@ -507,26 +552,30 @@ void WriteOutput(uint offset, uint value) {
     g_counter.InterlockedAdd(0, 1, nodeIndex);
 
     uint oldHead;
-    InterlockedExchange(g_listHeads[offset], nodeIndex, oldHead);
+    InterlockedExchange(g_listHeads[outOffset], nodeIndex, oldHead);
 
     OITFragment node;
-    node.data = value;
+    node.data = data.value;
     node.next = oldHead;
     g_fragments[nodeIndex] = node;
-}
 
-#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY
-
-void WriteOutput(uint offset, uint value) {
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
     // -------------------------------------------------------------------------
-    // Replace or Half-Luminance
+    // MSB
 
-    // Output pixel with the highest sequence number
+    // Apply MSB bit directly to FBRAM
 
-    InterlockedMax(g_internalSpriteOut[offset], value);
-}
+    if (pixel8Bits) {
+        outOffset &= ~1u;
+    } else {
+        outOffset <<= 1u;
+    }
+
+    WriteOr16(g_fbramOut, outOffset + fbOffset, 0x8000);
 
 #endif
+
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Entrypoint
@@ -540,8 +589,6 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     const PolySpan span = g_spanParams[spanIndex];
     const uint spanStep = id.x - g_spanPrefixSums[spanIndex] + span.skip;
-    const bool meshEnable = BitTest(span.cmdpmodcolr, 8);
-    const bool cullMeshPixels = !POLYSPEC_TRANSPARENT_MESH && meshEnable;
     // TODO: POLYSPEC_TRANSPARENT_MESH should output to the mesh buffer
     // TODO: handle dblInterlaceEnable, dblInterlaceDrawLine, deinterlace
 
@@ -613,59 +660,12 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         }
     }
 
-#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
+    OutData data;
+    data.cmdpmod = span.cmdpmodcolr;
+
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
     // =========================================================================
-    // MSB
-
-    // Apply MSB bit
-    const int2 coord = lineStepper.Coord();
-    if (!cullMeshPixels || !IsMeshCulled(coord)) {
-        uint outOffset = coord.y * fbSize.x + coord.x;
-        uint dummy;
-        if (pixel8Bits) {
-            outOffset &= ~1u;
-        } else {
-            outOffset <<= 1u;
-        }
-        WriteOr16(g_fbramOut, outOffset + fbOffset, 0x8000);
-    }
-
-    if (antialias && lineStepper.NeedsAA()) {
-        const int2 aaCoord = lineStepper.AACoord();
-        if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
-            uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
-            if (pixel8Bits) {
-                aaOutOffset &= ~1u;
-            } else {
-                aaOutOffset <<= 1u;
-            }
-            WriteOr16(g_fbramOut, aaOutOffset + fbOffset, 0x8000);
-        }
-    }
-
-#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_SHIFT
-    // =========================================================================
-    // Non-MSB: Shadow
-
-    // Output value is the number of shifts to apply to underlying pixels.
-    // Output merger applies the shift to pixels with MSB=1.
-
-    const int2 coord = lineStepper.Coord();
-    if (!cullMeshPixels || !IsMeshCulled(coord)) {
-        const uint outOffset = coord.y * fbSize.x + coord.x;
-        InterlockedAdd(g_internalSpriteOut[outOffset], 1);
-    }
-    if (antialias && lineStepper.NeedsAA()) {
-        const int2 aaCoord = lineStepper.AACoord();
-        if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
-            const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
-            InterlockedAdd(g_internalSpriteOut[aaOutOffset], 1);
-        }
-    }
-
-#else // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_COPY || POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
-    // =========================================================================
-    // Non-MSB: Replace, Half-Luminance or Half-Transparency
+    // Replace, Half-Luminance or Half-Transparency
 
     const uint shadingMode = BitExtract(span.cmdpmodcolr, 0, 2);
     const bool gouraudEnable = BitTest(span.cmdpmodcolr, 2);
@@ -692,21 +692,12 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         spriteData = Color555ToUint16(srcColor);
     }
 
-    const uint value = spriteData | ((spanIndex + 1u) << 16u);
+    data.value = spriteData | ((spanIndex + 1u) << 16u);
+#endif
 
     const int2 coord = lineStepper.Coord();
-    if (!cullMeshPixels || !IsMeshCulled(coord)) {
-        const uint outOffset = coord.y * fbSize.x + coord.x;
-        WriteOutput(outOffset, value);
-    }
-
+    WriteOutput(lineStepper.Coord(), data);
     if (antialias && lineStepper.NeedsAA()) {
-        const int2 aaCoord = lineStepper.AACoord();
-        if (!cullMeshPixels || !IsMeshCulled(aaCoord)) {
-            const uint aaOutOffset = aaCoord.y * fbSize.x + aaCoord.x;
-            WriteOutput(aaOutOffset, value);
-        }
+        WriteOutput(lineStepper.AACoord(), data);
     }
-
-#endif // POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
 }

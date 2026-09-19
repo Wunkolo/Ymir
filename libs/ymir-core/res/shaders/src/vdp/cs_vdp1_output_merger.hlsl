@@ -21,7 +21,7 @@
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
 #define POLYSPEC_TRANSPARENT_MESH 0
-#define POLYSPEC_MERGE_MODE       2
+#define POLYSPEC_MERGE_MODE       0
 #endif
 
 cbuffer RenderParamsBuffer : register(b0) {
@@ -50,19 +50,20 @@ static const bool dblInterlaceEnable = BitTest(g_commonParams.displayParams, 4);
 static const bool dblInterlaceDrawLine = BitTest(g_commonParams.displayParams, 5);
 static const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
 
-static const uint fbOffset = drawFB * kVDP1FBRAMSize;
-
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
+
+static const uint fbOffset = drawFB * kVDP1FBRAMSize;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Mergers
 
-#if POLYSPEC_MERGE_MODE == 0
+#if POLYSPEC_MERGE_MODE == POLYSPEC_SHADING_MODE_COPY
 // ----------------------------------------------------------------------------
 // Copy (Replace, Half-Luminance)
 
-void Merge8(uint2 pos) {
-    const uint inOffset = pos.x * 4 + pos.y * fbSize.x;
+void Merge8(uint2 pos, uint field) {
+    const uint2 inPos = uint2(pos.x * 4, pos.y);
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
 
     // Read and clear internal outputs
     const uint out0 = g_internalSpriteOut[inOffset + 0];
@@ -83,7 +84,7 @@ void Merge8(uint2 pos) {
     g_internalSpriteOut[inOffset + 2] = 0;
     g_internalSpriteOut[inOffset + 3] = 0;
 
-    const uint outOffset = inOffset;
+    const uint outOffset = inPos.x + inPos.y * fbSize.x + field * kVDP1FBRAMSize * 2;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (counter0 != 0) {
         fbramValue &= ~0xFFu;
@@ -104,8 +105,9 @@ void Merge8(uint2 pos) {
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
-void Merge16(uint2 pos) {
-    const uint inOffset = pos.x * 2 + pos.y * fbSize.x;
+void Merge16(uint2 pos, uint field) {
+    const uint2 inPos = uint2(pos.x * 2, pos.y);
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
 
     // Read and clear internal outputs
     const uint out0 = g_internalSpriteOut[inOffset + 0];
@@ -120,7 +122,7 @@ void Merge16(uint2 pos) {
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
 
-    const uint outOffset = inOffset * 2;
+    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize * 2;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (counter0 != 0) {
         fbramValue &= ~0xFFFFu;
@@ -133,16 +135,17 @@ void Merge16(uint2 pos) {
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
-#elif POLYSPEC_MERGE_MODE == 1
+#elif POLYSPEC_MERGE_MODE == POLYSPEC_SHADING_MODE_SHIFT
 // ----------------------------------------------------------------------------
 // Right-shift (Shadow)
 
-void Merge8(uint2 pos) {
+void Merge8(uint2 pos, uint field) {
     // Shadow does not apply to 8-bit mode.
 }
 
-void Merge16(uint2 pos) {
-    const uint inOffset = pos.x * 2 + pos.y * fbSize.x;
+void Merge16(uint2 pos, uint field) {
+    const uint2 inPos = uint2(pos.x * 2, pos.y);
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
 
     // Read and clear internal outputs
     const uint shift0 = min(g_internalSpriteOut[inOffset + 0], 5);
@@ -154,7 +157,7 @@ void Merge16(uint2 pos) {
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
 
-    const uint outOffset = inOffset * 2;
+    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize * 2;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (shift0 != 0) {
         uint4 color = Uint16ToColor555(BitExtract(fbramValue, 0, 16));
@@ -175,7 +178,7 @@ void Merge16(uint2 pos) {
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
-#elif POLYSPEC_MERGE_MODE == 2
+#elif POLYSPEC_MERGE_MODE == POLYSPEC_SHADING_MODE_OIT
 // ----------------------------------------------------------------------------
 // OIT (Half-Transparency)
 
@@ -220,16 +223,17 @@ uint HalfTransparentBlend(uint baseColor, uint listHead) {
     return Color555ToUint16(finalColor);
 }
 
-void Merge8(uint2 pos) {
+void Merge8(uint2 pos, uint field) {
     // Half-Transparency does not apply to 8-bit mode.
 }
 
-void Merge16(uint2 pos) {
+void Merge16(uint2 pos, uint field) {
     const uint2 inPos = uint2(pos.x * 2, pos.y);
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
 
     const uint2 heads = uint2(
-        g_listHeads[inPos.x + 0 + inPos.y * fbSize.x],
-        g_listHeads[inPos.x + 1 + inPos.y * fbSize.x]
+        g_listHeads[inOffset + 0],
+        g_listHeads[inOffset + 1]
     );
 
     // Early exit if nothing was written to either pixel
@@ -238,11 +242,11 @@ void Merge16(uint2 pos) {
     }
 
     // Clear heads
-    g_listHeads[inPos.x + 0 + inPos.y * fbSize.x] = 0xFFFFFFFF;
-    g_listHeads[inPos.x + 1 + inPos.y * fbSize.x] = 0xFFFFFFFF;
+    g_listHeads[inOffset + 0] = 0xFFFFFFFF;
+    g_listHeads[inOffset + 1] = 0xFFFFFFFF;
 
     // Get base FBRAM value
-    const uint fbramAddress = (inPos.x + inPos.y * fbSize.x) * 2 + fbOffset;
+    const uint fbramAddress = (inPos.x + inPos.y * fbSize.x) * 2 + fbOffset + field * kVDP1FBRAMSize * 2;
     uint fbramValue = g_fbramOut.Load(fbramAddress);
 
     // Modify
@@ -262,8 +266,8 @@ void Merge16(uint2 pos) {
 [numthreads(8, 8, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
     if (pixel8Bits) {
-        Merge8(id.xy);
+        Merge8(id.xy, id.z);
     } else {
-        Merge16(id.xy);
+        Merge16(id.xy, id.z);
     }
 }

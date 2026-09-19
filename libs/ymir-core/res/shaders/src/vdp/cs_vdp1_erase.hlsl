@@ -69,14 +69,13 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     }
     g_fbramOut.Store(address, value);
-    // TODO: handle enhancements
-    // if (transparentMeshes) {
-    //     // TODO: write 0 to transparent mesh buffer
-    // }
-    // if (deinterlace && dblInterlaceEnable) {
-    //     // TODO: write value to deinterlace buffer
-    //     if (transparentMeshes) {
-    //         // TODO: write 0 to transparent mesh deinterlace buffer
-    //     }
-    // }
+    if (transparentMeshes) {
+        // TODO: write 0 to transparent mesh buffer
+    }
+    if (deinterlace && dblInterlaceEnable) {
+        g_fbramOut.Store(address + kVDP1FBRAMSize * 2, value);
+        if (transparentMeshes) {
+            // TODO: write 0 to transparent mesh deinterlace buffer
+        }
+    }
 }
