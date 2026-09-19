@@ -54,6 +54,7 @@ static const uint interlaceMode = BitExtract(g_commonParams.displayParams, 2, 2)
 static const uint oddField = BitExtract(g_commonParams.displayParams, 4, 1);
 static const bool exclusiveMonitor = BitTest(g_commonParams.displayParams, 5);
 static const uint cramMode = BitExtract(g_commonParams.displayParams, 6, 2);
+static const bool hiResH = BitExtract(g_commonParams.displayParams, 10, 3) & 2;
 static const bool normalTVMode = BitExtract(g_commonParams.displayParams, 10, 3) < 2;
 
 static const bool colorGradEnable = BitTest(g_commonParams.layerParams, 28);
@@ -63,6 +64,14 @@ static const bool transparentMeshes = BitTest(g_commonParams.enhancements, 1);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Utilities
+
+uint GetLoResInputX(uint x) {
+    if (hiResH) {
+        return x >> 1u;
+    } else {
+        return x;
+    }
+}
 
 uint GetLoResInputY(uint y) {
     if (deinterlace && interlaceMode >= kInterlaceModeSingleDensity && !exclusiveMonitor) {
@@ -187,7 +196,7 @@ uint3 Color888(uint val32) {
 
 uint3 GetLineColor(uint layer, uint2 pos) {
     if (layer == kLayerRBG0 || (layer == kLayerNBG0_RBG1 && IsBGLayerEnabled(kBGLayerRBG1))) {
-        return g_rbgLineColorIn[uint3(pos.x, GetLoResInputY(pos.y), layer - kLayerRBG0)].rgb;
+        return g_rbgLineColorIn[uint3(GetLoResInputX(pos.x), GetLoResInputY(pos.y), layer - kLayerRBG0)].rgb;
     }
     return Color888(g_lnclBackIn[GetLoResInputY(pos.y)]);
 }
