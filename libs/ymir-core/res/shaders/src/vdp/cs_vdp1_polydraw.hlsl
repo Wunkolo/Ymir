@@ -517,7 +517,7 @@ void WriteOutput(int2 coord, OutData data) {
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
             fbOffset += 2 * kVDP1FBRAMSize;
 #else
-            outOffset = fbSize.x * fbSize.y;
+            outOffset += fbSize.x * fbSize.y;
 #endif
         }
         coord.y >>= 1;
@@ -589,8 +589,6 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     const PolySpan span = g_spanParams[spanIndex];
     const uint spanStep = id.x - g_spanPrefixSums[spanIndex] + span.skip;
-    // TODO: POLYSPEC_TRANSPARENT_MESH should output to the mesh buffer
-    // TODO: handle dblInterlaceEnable, dblInterlaceDrawLine, deinterlace
 
     const bool antialias = BitTest(span.attrs, 0);
     const bool textured = BitTest(span.attrs, 1);

@@ -2140,7 +2140,13 @@ struct Direct3D12VDPRenderer::Impl {
 
         // VDP1 FBRAM buffer
         {
-            auto builder = vdp1.fbramBuffer.BufferBuilder(kVDP1FBRAMSize * 2 * 2);
+            // kVDP1FBRAMSize is the size of a single framebuffer.
+            // VDP1 FBRAM actually contains two frames.
+            // *2 for deinterlace alternate field
+            // *2 for transparent mesh buffer
+            static constexpr UINT64 kSize = kVDP1FBRAMSize * 2 * 2 * 2;
+
+            auto builder = vdp1.fbramBuffer.BufferBuilder(kSize);
             builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -2162,7 +2168,7 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = kVDP1FBRAMSize * 2 * 2 / sizeof(uint32),
+                        .NumElements = kSize / sizeof(uint32),
                         .StructureByteStride = 0,
                         .Flags = D3D12_BUFFER_SRV_FLAG_RAW,
                     },
@@ -2178,7 +2184,7 @@ struct Direct3D12VDPRenderer::Impl {
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = kVDP1FBRAMSize * 2 * 2 / sizeof(uint32),
+                        .NumElements = kSize / sizeof(uint32),
                         .StructureByteStride = 0,
                         .CounterOffsetInBytes = 0,
                         .Flags = D3D12_BUFFER_UAV_FLAG_RAW,
@@ -2403,7 +2409,12 @@ struct Direct3D12VDPRenderer::Impl {
                 // Each entry in this buffer represents a logical output pixel.
                 // Entries are 32-bit, holding the sprite data in the 8 or 16 LSBs and the span index in the 16 MSBs to
                 // enable parallel rendering with guaranteed pixel ordering.
-                auto builder = frameCtx.internalSpriteOutBuffer.BufferBuilder(kVDP1FBRAMSize * 2 * sizeof(HLSLuint));
+                // *2 for deinterlace alternate field
+                // *2 for transparent mesh buffer
+                static constexpr UINT64 kNumEntries = kVDP1FBRAMSize * 2 * 2;
+                static constexpr UINT64 kEntrySize = sizeof(HLSLuint);
+
+                auto builder = frameCtx.internalSpriteOutBuffer.BufferBuilder(kNumEntries * kEntrySize);
                 builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
                 if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                     return util::ErrorMessage{
@@ -2427,7 +2438,7 @@ struct Direct3D12VDPRenderer::Impl {
                     .Buffer =
                         {
                             .FirstElement = 0,
-                            .NumElements = kVDP1FBRAMSize * 2,
+                            .NumElements = kNumEntries,
                             .StructureByteStride = sizeof(HLSLuint),
                             .CounterOffsetInBytes = 0,
                             .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
@@ -2441,7 +2452,12 @@ struct Direct3D12VDPRenderer::Impl {
             {
                 // Each entry in this buffer represents a logical output pixel.
                 // Entries are 32-bit, holding the index of the head of the list.
-                auto builder = frameCtx.oitListHeadsBuffer.BufferBuilder(kVDP1FBRAMSize * 2 * sizeof(HLSLuint));
+                // *2 for deinterlace alternate field
+                // *2 for transparent mesh buffer
+                static constexpr UINT64 kNumEntries = kVDP1FBRAMSize * 2 * 2;
+                static constexpr UINT64 kEntrySize = sizeof(HLSLuint);
+
+                auto builder = frameCtx.oitListHeadsBuffer.BufferBuilder(kNumEntries * kEntrySize);
                 builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
                 if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                     return util::ErrorMessage{fmt::format(
@@ -2464,8 +2480,8 @@ struct Direct3D12VDPRenderer::Impl {
                     .Buffer =
                         {
                             .FirstElement = 0,
-                            .NumElements = kVDP1FBRAMSize * 2,
-                            .StructureByteStride = sizeof(HLSLuint),
+                            .NumElements = kNumEntries,
+                            .StructureByteStride = kEntrySize,
                             .CounterOffsetInBytes = 0,
                             .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
                         },
