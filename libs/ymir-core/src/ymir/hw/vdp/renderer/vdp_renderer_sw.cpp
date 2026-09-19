@@ -1076,10 +1076,8 @@ FORCE_INLINE bool SoftwareVDPRenderer::VDP1PlotPixel(CoordS32 coord, const VDP1P
     }
 
     const bool altFB = deinterlace && doubleDensity && (y & 1);
-    if (doubleDensity) {
-        if (!deinterlace && regs1.dblInterlaceEnable && (y & 1) != regs1.dblInterlaceDrawLine) {
-            return true;
-        }
+    if (!deinterlace && doubleDensity && regs1.dblInterlaceEnable && (y & 1) != regs1.dblInterlaceDrawLine) {
+        return true;
     }
     if ((deinterlace && doubleDensity) || regs1.dblInterlaceEnable) {
         y >>= 1;
