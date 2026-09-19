@@ -23,6 +23,7 @@ struct DirtyBitmap {
     void Set(TEntry index) {
         if (index < numBits) {
             m_bitmap[index >> kEntryShift] |= 1ull << (index & kEntryMask);
+            m_anySet = true;
         }
     }
 
@@ -31,21 +32,40 @@ struct DirtyBitmap {
         m_bitmap.fill(kAllBits);
         if constexpr ((numBits & kEntryMask) != 0) {
             m_bitmap.back() = kAllBits >> (-numBits & kEntryMask);
+            m_anySet = true;
         }
     }
 
     /// @brief Resets all dirty bits.
     void ClearAll() {
         m_bitmap.fill(0);
+        m_anySet = false;
     }
 
     /// @brief Checks if any bit is set in the bitmap.
     /// @return `true` if any bit is set
     bool AnySet() const {
+        // Fast path
+        if (!m_anySet) {
+            return false;
+        }
+        // Slow path: check everything
         for (TEntry entry : m_bitmap) {
             if (entry != 0) {
                 return true;
             }
+        }
+        // Update result
+        m_anySet = false;
+        return false;
+    }
+
+    /// @brief Checks if the specified bit is set.
+    /// @param[in] index the bit to check
+    /// @return `true` if the bit is marked as dirty, `false` if not
+    bool Get(TEntry index) const {
+        if (index < numBits) {
+            return (m_bitmap[index >> kEntryShift] & (1ull << (index & kEntryMask))) != 0;
         }
         return false;
     }
@@ -127,6 +147,7 @@ struct DirtyBitmap {
 
 private:
     alignas(16) std::array<TEntry, kNumEntries> m_bitmap = {};
+    mutable bool m_anySet = false;
 };
 
 } // namespace util

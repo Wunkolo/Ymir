@@ -855,6 +855,7 @@ struct Direct3D12VDPRenderer::Impl {
         HLSLuint numSpans; // Number of spans in the list
     };
 
+    /// @brief VDP1 span drawing parameters.
     struct VDP1SpanParams {
         HLSLint2 coord0;        // Starting coordinates
         HLSLint2 coord1;        // Ending coordinates
@@ -876,6 +877,7 @@ struct Direct3D12VDPRenderer::Impl {
         HLSLuint3 gouraud1; // Ending gouraud value
     };
 
+    /// @brief VDP1 command parameters. Referenced by spans.
     struct VDP1CommandParams {
         struct SysClip {     //  bits  use
             HLSLuint h : 16; //  0-15  System clipping area width
@@ -897,9 +899,17 @@ struct Direct3D12VDPRenderer::Impl {
         HLSLuint cmdsrca : 16; // CMDSRCA value (textured only)
     };
 
+    /// @brief A fragment used by the order-independent transparency algorithm.
     struct VDP1OITFragment {
         HLSLuint data;
         HLSLuint next;
+    };
+
+    /// @brief An FBRAM write entry.
+    struct VDP1FBRAMWrite {
+        HLSLuint address;
+        HLSLuint andMask;
+        HLSLuint orMask;
     };
 
     /// @brief Maximum number of spans to send per batch.
@@ -960,14 +970,21 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief VRAM dirty bitmap.
         util::DirtyBitmap<kVRAMDirtyBitmapSize> vramDirty;
 
-        /// @brief FBRAM buffer. Twice as large to store the deinterlaced field as well.
+        /// @brief FBRAM buffer. Includes the alternate field for deinterlacing.
         D3D12Resource fbramBuffer;
         /// @brief FBRAM buffer SRV (offline).
         DescriptorRange fbramSRV;
         /// @brief FBRAM buffer UAV (offline).
         DescriptorRange fbramUAV;
 
-        // TODO: dirty tracking (read and write)
+        /// @brief FBRAM dirty bitmap (byte level).
+        util::DirtyBitmap<kVDP1FBRAMSize> fbramByteDirty;
+        /// @brief FBRAM dirty bitmap (32-bit word level).
+        util::DirtyBitmap<kVDP1FBRAMSize / sizeof(uint32)> fbramWordDirty;
+        /// @brief FBRAM writes buffer.
+        D3D12Resource fbramWritesBuffer;
+        /// @brief FBRAM writes buffer SRV (offline).
+        DescriptorRange fbramWritesSRV;
 
         // ---------------------------------------------------------------------
 
@@ -979,6 +996,15 @@ struct Direct3D12VDPRenderer::Impl {
 
         /// @brief Polygon drawing parameters, uploaded as 32-bit root constants.
         VDP1PolyDrawParams cpuPolyDrawParams{};
+
+        /// @brief Compute shader for writing to the framebuffer.
+        gpu::ComputeShader fbramWriteShader;
+        /// @brief Root signature for writing to the framebuffer.
+        D3D12RootSignature fbramWriteRootSig;
+        /// @brief Descriptor range for writing to the framebuffer.
+        DescriptorRange fbramWriteDescs;
+        /// @brief Pipeline state object for writing to the framebuffer.
+        D3D12PipelineState fbramWritePSO;
 
         /// @brief Compute shader for erasing the framebuffer.
         gpu::ComputeShader eraseShader;
@@ -2222,8 +2248,96 @@ struct Direct3D12VDPRenderer::Impl {
                                               vdp1.fbramUAV.cpuHandle);
         }
 
+        // VDP1 FBRAM writes buffer
+        {
+            static constexpr UINT64 kSize = sizeof(VDP1FBRAMWrite) * kVDP1FBRAMSize;
+
+            auto builder = vdp1.fbramWritesBuffer.BufferBuilder(kSize);
+            builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create VDP1 FBRAM writes buffer, error code {:X}", (uint32)hr)};
+            }
+            vdp1.fbramWritesBuffer->SetName(L"[Ymir-VDP1] FBRAM writes buffer");
+
+            barrierTracker.InitializeBuffer(vdp1.fbramWritesBuffer.GetPointer(),
+                                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                            D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
+
+            if (!offlineHeapAlloc.Allocate(vdp1.fbramWritesSRV)) {
+                return util::ErrorMessage{"Could not allocate VDP1 FBRAM writes buffer SRV"};
+            }
+            const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+                .Format = DXGI_FORMAT_R32_TYPELESS,
+                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Buffer =
+                    {
+                        .FirstElement = 0,
+                        .NumElements = kSize / sizeof(uint32),
+                        .StructureByteStride = 0,
+                        .Flags = D3D12_BUFFER_SRV_FLAG_RAW,
+                    },
+            };
+            device->CreateShaderResourceView(vdp1.fbramWritesBuffer.GetPointer(), &srvDesc,
+                                             vdp1.fbramWritesSRV.cpuHandle);
+        }
+
         // -------------------------------------------------------------------------------------------------------------
         // Shaders and root signatures
+
+        // Framebuffer write
+        {
+            auto shaderBlobResult = LoadShader("src/vdp/cs_vdp1_fbram_write.cso");
+            if (!shaderBlobResult) {
+                return util::ErrorMessage{fmt::format("Could not load VDP1 framebuffer write compute shader: {}",
+                                                      shaderBlobResult.Error().message)};
+            }
+            vdp1.fbramWriteShader.format = gpu::ShaderBytecodeFormat::DXIL;
+            vdp1.fbramWriteShader.bytecode = shaderBlobResult.Value();
+            vdp1.fbramWriteShader.entrypoint = kCSEntrypoint;
+            auto result = gpu::ValidateShader(vdp1.fbramWriteShader);
+            if (!result) {
+                return util::ErrorMessage{
+                    fmt::format("VDP1 framebuffer write compute shader validation failed: {}", result.Error().message)};
+            }
+
+            auto rootSigBuilder = vdp1.fbramWriteRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, sizeof(VDP1CommonRenderParams) / sizeof(uint32) + 1);
+
+            rootSigBuilder.AddDescriptorTable()
+                .AddSRVs(1, 1)  // NOTE: starting from 1 because SPIRV-Cross assumes buffers in t0 are constant
+                .AddUAVs(1, 1); // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not build VDP1 framebuffer write root signature, error code {:X}", (uint32)hr)};
+            }
+            vdp1.fbramWriteRootSig->SetName(L"[Ymir-VDP1] Framebuffer write root signature");
+
+            const D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+                .pRootSignature = vdp1.fbramWriteRootSig.GetPointer(),
+                .CS = ToShaderBytecode(vdp1.fbramWriteShader),
+            };
+            if (HRESULT hr = vdp1.fbramWritePSO.CreateCompute(device, psoDesc); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Could not build VDP1 framebuffer write pipeline state object, error code {:X}", (uint32)hr)};
+            }
+            vdp1.fbramWritePSO->SetName(L"[Ymir-VDP1] Framebuffer write pipeline state object");
+
+            const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
+                vdp1.fbramWritesSRV.cpuHandle,
+                vdp1.fbramUAV.cpuHandle,
+            };
+            std::array<UINT, std::size(srcHandles)> srcSizes{};
+            srcSizes.fill(1);
+
+            if (!resourceHeapAlloc.Allocate(vdp1.fbramWriteDescs, std::size(srcHandles))) {
+                return util::ErrorMessage{"Could not allocate VDP1 framebuffer write descriptors"};
+            }
+
+            device->CopyDescriptors(1, &vdp1.fbramWriteDescs.cpuHandle, &vdp1.fbramWriteDescs.count,
+                                    std::size(srcHandles), srcHandles, srcSizes.data(), resourceHeap.GetHeapType());
+        }
 
         // Framebuffer erase
         {
@@ -2240,6 +2354,17 @@ struct Direct3D12VDPRenderer::Impl {
                 return util::ErrorMessage{
                     fmt::format("VDP1 framebuffer erase compute shader validation failed: {}", result.Error().message)};
             }
+
+            auto rootSigBuilder = vdp1.eraseRootSig.Builder();
+            rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1EraseParams)) /
+                                                    sizeof(uint32));
+            // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
+            rootSigBuilder.AddDescriptorTable().AddUAVs(1, 1);
+            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not build VDP1 framebuffer erase root signature, error code {:X}", (uint32)hr)};
+            }
+            vdp1.eraseRootSig->SetName(L"[Ymir-VDP1] Framebuffer erase root signature");
         }
 
         // Polygon drawing
@@ -2263,20 +2388,6 @@ struct Direct3D12VDPRenderer::Impl {
                     fmt::format("VDP1 polygon drawing compute shader variant {} validation failed: {}", variantName,
                                 result.Error().message)};
             }
-        }
-
-        // Framebuffer erase root signature.
-        {
-            auto rootSigBuilder = vdp1.eraseRootSig.Builder();
-            rootSigBuilder.Add32BitConstants(0, (sizeof(VDP1CommonRenderParams) + sizeof(VDP1EraseParams)) /
-                                                    sizeof(uint32));
-            // NOTE: starting from 1 because SPIRV-Cross assumes buffers in u0 are constant
-            rootSigBuilder.AddDescriptorTable().AddUAVs(1, 1);
-            if (HRESULT hr = rootSigBuilder.Build(device); FAILED(hr)) {
-                return util::ErrorMessage{
-                    fmt::format("Could not build VDP1 framebuffer erase root signature, error code {:X}", (uint32)hr)};
-            }
-            vdp1.eraseRootSig->SetName(L"[Ymir-VDP1] Framebuffer erase root signature");
         }
 
         // Polygon drawing root signature.
@@ -3560,6 +3671,9 @@ struct Direct3D12VDPRenderer::Impl {
     void Reset() {
         // VDP1
         vdp1.vramDirty.SetAll();
+        if (auto result = VDP1UploadFBRAM(); !result) {
+            devlog::warn<grp::dx12_base>("Failed to upload VDP1 FBRAM: {}", result.Error().message);
+        }
 
         // VDP2
         vdp2.vramDirty.SetAll();
@@ -3622,8 +3736,11 @@ struct Direct3D12VDPRenderer::Impl {
         // TODO: loosely wait until VDP1 rendering has caught up, maybe
     }
 
-    void VDP1WriteFB(uint32 address) {
-        // TODO: mark as dirty
+    void VDP1WriteFB(uint32 address, uint32 size) {
+        for (uint32 i = 0; i < size; ++i) {
+            vdp1.fbramByteDirty.Set(address + i);
+        }
+        vdp1.fbramWordDirty.Set(address / sizeof(uint32));
     }
 
     [[nodiscard]] util::VoidResult<> VDP1FlushVRAM() {
@@ -3658,6 +3775,135 @@ struct Direct3D12VDPRenderer::Impl {
             cmdList->CopyBufferRegion(dstResource, vramOffset, uploadBufferPtr, alloc.offset, size);
         }
         vdp1.vramDirty.ClearAll();
+
+        return {};
+    }
+
+    [[nodiscard]] util::VoidResult<> VDP1UploadFBRAM() {
+        // Buffers:
+        // [0] main field
+        // [1] alternate (deinterlace) field
+        // [2] main mesh field
+        // [3] alternate mesh field
+        static constexpr size_t kFrameSize = kVDP1FBRAMSize * 2;
+
+        ID3D12Resource *dstResource = vdp1.fbramBuffer.GetPointer();
+        ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
+
+        // Transition to copy
+        barrierTracker.TransitionBuffer(dstResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_BARRIER_SYNC_COPY,
+                                        D3D12_BARRIER_ACCESS_COPY_DEST);
+        barrierTracker.Flush(cmdList);
+
+        // Get upload buffer chunk
+        UploadAllocation alloc{};
+        if (auto result = AllocateUploadBuffer(uploadBuffer, kFrameSize, 4, alloc); !result) {
+            return util::ErrorMessage{
+                fmt::format("Failed to allocate upload buffer for VDP1 FBRAM: {}", result.Error().message)};
+        }
+
+        // Upload buffer
+        memcpy(alloc.data, vdpState.spriteFB.data(), kFrameSize);
+        cmdList->CopyBufferRegion(dstResource, kFrameSize * 0, uploadBufferPtr, alloc.offset, kFrameSize);
+        if (enhancements.deinterlace) {
+            cmdList->CopyBufferRegion(dstResource, kFrameSize * 1, uploadBufferPtr, alloc.offset, kFrameSize);
+        }
+
+        if (enhancements.transparentMeshes) {
+            // Transition to UAV usage for clearing
+            barrierTracker.TransitionBuffer(dstResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                            D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+            barrierTracker.Flush(cmdList);
+
+            // Clear mesh buffers
+            // Buffers 2 and 3 are the main and alternate mesh buffers respectively
+            static constexpr UINT kClearValue[4] = {0, 0, 0, 0};
+            const D3D12_RECT rect{
+                .left = kFrameSize * 2,
+                .top = 0,
+                .right = static_cast<LONG>(kFrameSize * (enhancements.deinterlace ? 4 : 3)),
+                .bottom = 1,
+            };
+            cmdList->ClearUnorderedAccessViewUint(vdp1.fbramWriteDescs.GetGPUHandle(1), vdp1.fbramUAV.cpuHandle,
+                                                  dstResource, kClearValue, 1, &rect);
+        }
+
+        // No longer dirty
+        vdp1.fbramByteDirty.ClearAll();
+        vdp1.fbramWordDirty.ClearAll();
+
+        return {};
+    }
+
+    [[nodiscard]] util::VoidResult<> VDP1FlushFBRAM() {
+        if (!vdp1.fbramWordDirty) {
+            return {};
+        }
+
+        ID3D12Resource *dstResource = vdp1.fbramWritesBuffer.GetPointer();
+        ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
+
+        // Transition to copy
+        barrierTracker.TransitionBuffer(dstResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_BARRIER_SYNC_COPY,
+                                        D3D12_BARRIER_ACCESS_COPY_DEST);
+        barrierTracker.Flush(cmdList);
+
+        auto &fb = vdpState.spriteFB[vdpState.displayFB];
+
+        // Group modified FBRAM writes into 32-bit chunks
+        std::vector<VDP1FBRAMWrite> writes{};
+        size_t pos, count = 0;
+        for (pos = vdp1.fbramWordDirty.FindNext(count); pos < vdp1.fbramWordDirty.Size();
+             pos = vdp1.fbramWordDirty.FindNext(count, pos + count)) {
+            const uint32 baseAddress = pos * sizeof(uint32);
+
+            for (size_t i = 0; i < count; ++i) {
+                VDP1FBRAMWrite &write = writes.emplace_back();
+                write.address = baseAddress + i * 4u;
+                write.andMask = 0xFFFFFFFF;
+                write.orMask = 0;
+
+                for (uint32 j = 0; j < 4; ++j) {
+                    const uint32 address = write.address + j;
+                    const uint32 shift = (j ^ 1u) * 8u;
+                    if (vdp1.fbramByteDirty.Get(address)) {
+                        write.andMask &= ~(0xFFu << shift);
+                        write.orMask |= fb[address] << shift;
+                    }
+                }
+            }
+        }
+        vdp1.fbramWordDirty.ClearAll();
+        vdp1.fbramByteDirty.ClearAll();
+
+        assert(!writes.empty());
+
+        // Get upload buffer chunk for this transfer
+        UploadAllocation alloc{};
+        const size_t size = writes.size() * sizeof(VDP1FBRAMWrite);
+        if (auto result = AllocateUploadBuffer(uploadBuffer, size, 4, alloc); !result) {
+            return util::ErrorMessage{
+                fmt::format("Failed to allocate upload buffer for VDP1 FBRAM writes list: {}", result.Error().message)};
+        }
+
+        // Upload list
+        memcpy(alloc.data, writes.data(), size);
+        cmdList->CopyBufferRegion(dstResource, 0, uploadBufferPtr, alloc.offset, size);
+
+        // Transition to SRV usage
+        barrierTracker.TransitionBuffer(dstResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                        D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE);
+        barrierTracker.Flush(cmdList);
+
+        // Dispatch FBRAM write compute shader
+        const uint32 writeCount = writes.size();
+        cmdList->SetPipelineState(vdp1.fbramWritePSO.GetPointer());
+        cmdList->SetComputeRootSignature(vdp1.fbramWriteRootSig.GetPointer());
+        cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
+                                              &vdp1.cpuCommonRenderParams, 0);
+        cmdList->SetComputeRoot32BitConstants(0, 1, &writeCount, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32));
+        cmdList->SetComputeRootDescriptorTable(1, vdp1.fbramWriteDescs.gpuHandle);
+        cmdList->Dispatch((writeCount + 63) / 64, 1, 1);
 
         return {};
     }
@@ -3727,7 +3973,19 @@ struct Direct3D12VDPRenderer::Impl {
 
     void VDP1SwapFramebuffer() {
         // Submit any pending spans
-        VDP1SubmitSpans();
+        auto spanResult = VDP1SubmitSpans();
+        if (spanResult) {
+            if (!spanResult.Value()) {
+                // Still have to update the rendering parameters
+                VDP1UpdateCommonRenderParams();
+            }
+        } else {
+            devlog::warn<grp::dx12_vdp1>("VDP1 span submission failed: {}", spanResult.Error().message);
+        }
+
+        if (auto result = VDP1FlushFBRAM(); !result) {
+            devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
+        }
     }
 
     void VDP1BeginFrame() {
@@ -3777,12 +4035,12 @@ struct Direct3D12VDPRenderer::Impl {
         uint32 endCodeIndex;
     };
 
-    util::VoidResult<> VDP1SubmitSpans() {
+    util::ValueResult<bool> VDP1SubmitSpans() {
         FrameContext &frameCtx = frames.GetCurrentFrame();
         if (frameCtx.cpuSpanCount == 0) {
             // No spans to dispatch
             frameCtx.cpuCmdCount = 0;
-            return {};
+            return false;
         }
 
         // Clear counters even if we fail to submit them to avoid crashes on extreme cases.
@@ -3795,8 +4053,14 @@ struct Direct3D12VDPRenderer::Impl {
         // We should have a shader selected by now
         assert(vdp1.currPolyDrawShaderIndex != -1);
 
+        VDP1UpdateCommonRenderParams();
+        vdp1.cpuPolyDrawParams.numSpans = frameCtx.cpuSpanCount;
+
         if (auto result = VDP1FlushVRAM(); !result) {
             devlog::warn<grp::dx12_vdp1>("VDP1 VRAM flush failed: {}", result.Error().message);
+        }
+        if (auto result = VDP1FlushFBRAM(); !result) {
+            devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
         }
 
         ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
@@ -3861,9 +4125,6 @@ struct Direct3D12VDPRenderer::Impl {
         barrierTracker.TransitionBuffer(frameCtx.internalSpriteOutBuffer.GetPointer(),
                                         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
                                         D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
-
-        VDP1UpdateCommonRenderParams();
-        vdp1.cpuPolyDrawParams.numSpans = frameCtx.cpuSpanCount;
 
         const bool isOIT = IsVDP1PolyDrawShaderOIT(vdp1.currPolyDrawShaderIndex);
         const bool isMSB = IsVDP1PolyDrawShaderMSB(vdp1.currPolyDrawShaderIndex);
@@ -3959,7 +4220,7 @@ struct Direct3D12VDPRenderer::Impl {
             cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, mergeZ);
         }
 
-        return {};
+        return true;
     }
 
     void VDP1UpdateCommonRenderParams() {
@@ -5825,7 +6086,9 @@ void Direct3D12VDPRenderer::PreSaveStateSync() {}
 
 void Direct3D12VDPRenderer::PostLoadStateSync() {
     m_impl->vdp1.vramDirty.SetAll();
-    // TODO: make FBRAM dirty
+    if (auto result = m_impl->VDP1UploadFBRAM(); !result) {
+        devlog::warn<grp::dx12_base>("Failed to upload VDP1 FBRAM: {}", result.Error().message);
+    }
 
     m_impl->VDP2CacheAllCRAMColors();
     m_impl->VDP2UpdateEnabledLayers();
@@ -5864,11 +6127,11 @@ void Direct3D12VDPRenderer::VDP1DebugSyncFB() {
 }
 
 void Direct3D12VDPRenderer::VDP1WriteFB(uint32 address, uint8 value) {
-    m_impl->VDP1WriteFB(address);
+    m_impl->VDP1WriteFB(address, 1);
 }
 
 void Direct3D12VDPRenderer::VDP1WriteFB(uint32 address, uint16 value) {
-    m_impl->VDP1WriteFB(address);
+    m_impl->VDP1WriteFB(address, 2);
 }
 
 void Direct3D12VDPRenderer::VDP1WriteReg(uint32 address, uint16 value) {
