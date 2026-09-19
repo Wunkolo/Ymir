@@ -64,17 +64,17 @@ Buffer<uint> g_spanPrefixSums : register(t2);
 StructuredBuffer<CommandParams> g_commandParams : register(t3);
 ByteAddressBuffer g_vram : register(t4);
 
-#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
-
-// MSB writes directly to FBRAM
-RWByteAddressBuffer g_fbramOut : register(u1);
-
-#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
+#if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_OIT
 
 // Half-Transparency uses per-pixel linked lists for order-independent transparency
 RWBuffer<uint> g_listHeads : register(u1);
 RWStructuredBuffer<OITFragment> g_fragments : register(u2);
 RWByteAddressBuffer g_counter : register(u3);
+
+#elif POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
+
+// MSB writes directly to FBRAM
+RWByteAddressBuffer g_fbramOut : register(u1);
 
 #else
 

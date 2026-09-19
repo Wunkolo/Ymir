@@ -2880,9 +2880,8 @@ struct Direct3D12VDPRenderer::Impl {
             // Polygon drawing descriptors (MSB variant only)
             {
                 const D3D12_CPU_DESCRIPTOR_HANDLE srcHandles[] = {
-                    frameCtx.spanParamsSRV.cpuHandle,
-                    frameCtx.spanPrefixSumsSRV.cpuHandle,
-                    vdp1.vramSRV.cpuHandle,
+                    frameCtx.spanParamsSRV.cpuHandle, frameCtx.spanPrefixSumsSRV.cpuHandle,
+                    frameCtx.cmdParamsSRV.cpuHandle,  vdp1.vramSRV.cpuHandle,
                     vdp1.fbramUAV.cpuHandle,
                 };
                 std::array<UINT, std::size(srcHandles)> srcSizes{};
