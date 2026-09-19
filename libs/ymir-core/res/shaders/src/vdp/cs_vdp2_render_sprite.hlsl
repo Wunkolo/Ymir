@@ -18,7 +18,7 @@ StructuredBuffer<RotParamBase> g_rotParamBases : register(t4);
 ByteAddressBuffer g_spriteFB : register(t5);
 
 RWTexture2DArray<uint4> g_layerOut : register(u0);
-RWTexture2D<uint> g_spriteAttrsOut : register(u1);
+RWTexture2DArray<uint> g_spriteAttrsOut : register(u1);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Parameters
@@ -492,10 +492,10 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
 [numthreads(32, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint2 drawCoord = uint2(id.x, id.y + g_commonParams.startY);
-    const uint3 outCoord = uint3(drawCoord.x, GetY(drawCoord.y), id.z + 6);
+    const uint2 outCoord = uint2(drawCoord.x, GetY(drawCoord.y));
     const SpriteOutput output = DrawSprite(drawCoord, outCoord.xy, id.z);
-    g_layerOut[outCoord] = output.layer;
-    g_spriteAttrsOut[outCoord.xy] =
+    g_layerOut[uint3(outCoord.xy, id.z + 6)] = output.layer;
+    g_spriteAttrsOut[uint3(outCoord.xy, id.z)] =
         output.colorCalcRatio |
         ((output.colorMSB ? 1u : 0u) << kSpriteAttrBitColorMSB) |
         ((output.shadowOrWindow ? 1u : 0u) << kSpriteAttrBitShadowWindow) |
