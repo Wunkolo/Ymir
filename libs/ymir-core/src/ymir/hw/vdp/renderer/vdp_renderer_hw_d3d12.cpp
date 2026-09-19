@@ -944,8 +944,9 @@ struct Direct3D12VDPRenderer::Impl {
             memset(&cpuEraseParams, 0, sizeof(cpuEraseParams));
             memset(&cpuPolyDrawParams, 0, sizeof(cpuPolyDrawParams));
         }
+
         // VDP1 VRAM is exposed as a ByteAddressBuffer to shaders as they often need to access raw bytes in 8-bit and
-        // 16-bit formats.
+        // 16-bit units.
 
         /// @brief VRAM buffer.
         D3D12Resource vramBuffer;
@@ -970,7 +971,14 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief VRAM dirty bitmap.
         util::DirtyBitmap<kVRAMDirtyBitmapSize> vramDirty;
 
-        /// @brief FBRAM buffer. Includes the alternate field for deinterlacing.
+        // The VDP1 FBRAM buffer contains four FBRAM-sized buffers to accomodate the outputs of the enhancements.
+        // The buffers are indexed as follows:
+        //   [0] Main field
+        //   [1] Alternate field (deinterlace)
+        //   [2] Main mesh field
+        //   [3] Alternate mesh field
+
+        /// @brief FBRAM buffer.
         D3D12Resource fbramBuffer;
         /// @brief FBRAM buffer SRV (offline).
         DescriptorRange fbramSRV;
@@ -985,6 +993,13 @@ struct Direct3D12VDPRenderer::Impl {
         D3D12Resource fbramWritesBuffer;
         /// @brief FBRAM writes buffer SRV (offline).
         DescriptorRange fbramWritesSRV;
+
+        /// @brief FBRAM download buffer.
+        D3D12Resource fbramDownloadBuffer;
+        /// @brief Permanently mapped view of the FBRAM download buffer.
+        void *fbramDownloadBufferPtr = nullptr;
+        /// @brief Current version of downloaded FBRAM.
+        UINT64 fbramDownloadVersion = 0;
 
         // ---------------------------------------------------------------------
 
@@ -1728,7 +1743,7 @@ struct Direct3D12VDPRenderer::Impl {
             , debugRenderOptions(debugRenderOptions) {}
 
         // VDP2 VRAM is exposed as a ByteAddressBuffer to shaders as they often need to access raw bytes in 8-bit,
-        // 16-bit and 32-bit formats.
+        // 16-bit and 32-bit units.
 
         /// @brief VRAM data buffer.
         D3D12Resource vramBuffer;
@@ -2287,6 +2302,27 @@ struct Direct3D12VDPRenderer::Impl {
             };
             device->CreateShaderResourceView(vdp1.fbramWritesBuffer.GetPointer(), &srvDesc,
                                              vdp1.fbramWritesSRV.cpuHandle);
+        }
+
+        // VDP1 FBRAM download buffer
+        {
+            // Allocate enough room to download the standard VDP1 FBRAM.
+            // TODO: add deinterlace and transparent mesh buffers to save state
+            static constexpr UINT64 kSize = kVDP1FBRAMSize * 2;
+
+            auto builder = vdp1.fbramDownloadBuffer.BufferBuilder(kSize);
+            builder.InitialState(D3D12_RESOURCE_STATE_COPY_DEST);
+            builder.HeapType(D3D12_HEAP_TYPE_READBACK);
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not create VDP1 FBRAM download buffer, error code {:X}", (uint32)hr)};
+            }
+            vdp1.fbramDownloadBuffer->SetName(L"[Ymir-VDP1] FBRAM download buffer");
+
+            if (HRESULT hr = vdp1.fbramDownloadBuffer->Map(0, nullptr, &vdp1.fbramDownloadBufferPtr); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Could not map VDP1 FBRAM download buffer, error code {:X}", (uint32)hr)};
+            }
         }
 
         // -------------------------------------------------------------------------------------------------------------
@@ -3734,12 +3770,21 @@ struct Direct3D12VDPRenderer::Impl {
         vdp1.vramDirty.Set(address >> VDP1Resources::kVRAMDirtyBitmapChunkSizeShift);
     }
 
+    void VDP1DownloadFBRAM() {
+        const UINT64 fenceValue = computeFence.GetCompletedValue();
+        if (vdp1.fbramDownloadVersion < fenceValue) {
+            vdp1.fbramDownloadVersion = fenceValue;
+            memcpy(vdpState.spriteFB.data(), vdp1.fbramDownloadBufferPtr, kVDP1FBRAMSize * 2);
+        }
+    }
+
     void VDP1SyncFB() {
         frames.WaitForLatestFrame(computeFence, cmdQueue);
+        VDP1DownloadFBRAM();
     }
 
     void VDP1DebugSyncFB() {
-        // TODO: loosely wait until VDP1 rendering has caught up, maybe
+        VDP1DownloadFBRAM();
     }
 
     void VDP1WriteFB(uint32 address, uint32 size) {
@@ -3786,11 +3831,6 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     [[nodiscard]] util::VoidResult<> VDP1UploadFBRAM() {
-        // Buffers:
-        // [0] main field
-        // [1] alternate (deinterlace) field
-        // [2] main mesh field
-        // [3] alternate mesh field
         static constexpr size_t kFrameSize = kVDP1FBRAMSize * 2;
 
         ID3D12Resource *dstResource = vdp1.fbramBuffer.GetPointer();
@@ -3989,9 +4029,17 @@ struct Direct3D12VDPRenderer::Impl {
             devlog::warn<grp::dx12_vdp1>("VDP1 span submission failed: {}", spanResult.Error().message);
         }
 
+        // Flush FBRAM writes
         if (auto result = VDP1FlushFBRAM(); !result) {
             devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
         }
+
+        // Download FBRAM
+        barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                        D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_SOURCE);
+        barrierTracker.Flush(cmdList);
+        cmdList->CopyBufferRegion(vdp1.fbramDownloadBuffer.GetPointer(), 0, vdp1.fbramBuffer.GetPointer(), 0,
+                                  kVDP1FBRAMSize * 2);
     }
 
     void VDP1BeginFrame() {
