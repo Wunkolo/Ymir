@@ -1031,6 +1031,9 @@ struct Direct3D12VDPRenderer::Impl {
         if (mode.msbOn) {
             // MSB -> mode 3 (MSB)
             bit::deposit_into<1, 2>(value, 3);
+        } else if (vdpState.regs1.pixel8Bits) {
+            // 8-bit sprite data -> mode 0 (Copy) -- shading modes not supported
+            bit::deposit_into<1, 2>(value, 0);
         } else if (mode.colorCalcBits == 3) {
             // Half-Transparency -> mode 2 (OIT)
             bit::deposit_into<1, 2>(value, 2);
@@ -1085,7 +1088,10 @@ struct Direct3D12VDPRenderer::Impl {
     size_t MakeVDP1OutputMergerShaderIndex(VDP1Command::DrawMode mode) const {
         size_t value = 0;
         bit::deposit_into<0>(value, enhancements.transparentMeshes);
-        if (mode.colorCalcBits == 1) {
+        if (vdpState.regs1.pixel8Bits) {
+            // 8-bit sprite data -> mode 0 (Copy) -- shading modes not supported
+            bit::deposit_into<1, 2>(value, 0);
+        } else if (mode.colorCalcBits == 1) {
             // Shadow -> mode 1
             bit::deposit_into<1, 2>(value, 1);
         } else if (mode.colorCalcBits == 3) {
