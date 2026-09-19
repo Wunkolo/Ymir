@@ -1020,6 +1020,8 @@ struct Direct3D12VDPRenderer::Impl {
         size_t currPolyDrawShaderIndex = -1;
         // Currently active output merger shader
         size_t currOutputMergerShaderIndex = -1;
+        // Set to true if any transparent mesh polygon was drawn
+        bool transparentMeshDrawn = false;
     } vdp1;
 
     /// @brief Constructs a polygon drawing shader index from its variant options.
@@ -1087,7 +1089,7 @@ struct Direct3D12VDPRenderer::Impl {
     /// @return the shader index
     size_t MakeVDP1OutputMergerShaderIndex(VDP1Command::DrawMode mode) const {
         size_t value = 0;
-        bit::deposit_into<0>(value, enhancements.transparentMeshes);
+        // NOTE: bit 0 is reserved for transparent meshes, which is invoked separately
         if (vdpState.regs1.pixel8Bits) {
             // 8-bit sprite data -> mode 0 (Copy) -- shading modes not supported
             bit::deposit_into<1, 2>(value, 0);
@@ -3837,7 +3839,7 @@ struct Direct3D12VDPRenderer::Impl {
             barrierTracker.UAVBuffer(frameCtx.internalSpriteOutBuffer.GetPointer());
             barrierTracker.Flush(cmdList);
 
-            // Dispatch output merger shader
+            // Set up parameters
             const D3D12RootSignature &rootSig = isMergerOIT ? vdp1.outputMergerOITRootSig : vdp1.outputMergerRootSig;
             const DescriptorRange &descs = isMergerOIT ? frameCtx.outputMergerOITDescs : frameCtx.outputMergerDescs;
             const VDP1Regs &regs1 = vdpState.regs1;
@@ -3846,6 +3848,23 @@ struct Direct3D12VDPRenderer::Impl {
             const uint32 mergeW = regs1.fbSizeH / pixelsPerEntry;
             const uint32 mergeH = regs1.fbSizeV;
             const uint32 mergeZ = regs2.TVMD.IsInterlaced() && enhancements.deinterlace ? 2 : 1;
+
+            // Dispatch transparent mesh variant if any such polygons were drawn
+            if (vdp1.transparentMeshDrawn) {
+                vdp1.transparentMeshDrawn = false;
+                cmdList->SetPipelineState(frameCtx.outputMergerPSOs[vdp1.currOutputMergerShaderIndex | 1].GetPointer());
+                cmdList->SetComputeRootSignature(rootSig.GetPointer());
+                cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
+                                                      &vdp1.cpuCommonRenderParams, 0);
+                cmdList->SetComputeRootDescriptorTable(1, descs.gpuHandle);
+                cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, mergeZ);
+
+                // Ensure the dispatch is done
+                barrierTracker.UAVBuffer(vdp1.fbramBuffer.GetPointer());
+                barrierTracker.Flush(cmdList);
+            }
+
+            // Dispatch output merger shader
             cmdList->SetPipelineState(frameCtx.outputMergerPSOs[vdp1.currOutputMergerShaderIndex].GetPointer());
             cmdList->SetComputeRootSignature(rootSig.GetPointer());
             cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
@@ -3907,6 +3926,11 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Switch polygon drawing shader based on the current settings
         VDP1SelectPolyDrawShader(data.mode);
+
+        // Mark transparent mesh drawn if that's the case
+        if (data.mode.meshEnable && enhancements.transparentMeshes) {
+            vdp1.transparentMeshDrawn = true;
+        }
 
         // Determine span length
         LineStepper line{coord0, coord1};

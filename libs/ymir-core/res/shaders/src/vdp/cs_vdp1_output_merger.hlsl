@@ -20,9 +20,12 @@
 
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
-#define POLYSPEC_TRANSPARENT_MESH 0
+#define POLYSPEC_TRANSPARENT_MESH 1
 #define POLYSPEC_MERGE_MODE       0
 #endif
+
+// TODO: figure out how shadow and transparent pixels on the transparent mesh layer should be rendered
+// - also broken on the software renderer
 
 cbuffer RenderParamsBuffer : register(b0) {
     CommonRenderParams g_commonParams;
@@ -63,74 +66,132 @@ static const uint fbOffset = drawFB * kVDP1FBSize;
 
 void Merge8(uint2 pos, uint field) {
     const uint2 inPos = uint2(pos.x * 4, pos.y);
-    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + (field + POLYSPEC_TRANSPARENT_MESH * 2) * fbSize.x * fbSize.y;
 
-    // Read and clear internal outputs
+    // Read internal outputs
     const uint out0 = g_internalSpriteOut[inOffset + 0];
     const uint out1 = g_internalSpriteOut[inOffset + 1];
     const uint out2 = g_internalSpriteOut[inOffset + 2];
     const uint out3 = g_internalSpriteOut[inOffset + 3];
 
-    const uint counter0 = BitExtract(out0, 16, 16);
-    const uint counter1 = BitExtract(out1, 16, 16);
-    const uint counter2 = BitExtract(out2, 16, 16);
-    const uint counter3 = BitExtract(out3, 16, 16);
-    if (counter0 == 0 && counter1 == 0 && counter2 == 0 && counter3 == 0) {
+    // Get sequence numbers
+    uint seqNum0 = BitExtract(out0, 16, 16);
+    uint seqNum1 = BitExtract(out1, 16, 16);
+    uint seqNum2 = BitExtract(out2, 16, 16);
+    uint seqNum3 = BitExtract(out3, 16, 16);
+    bool hasPixel0 = seqNum0 != 0;
+    bool hasPixel1 = seqNum1 != 0;
+    bool hasPixel2 = seqNum2 != 0;
+    bool hasPixel3 = seqNum3 != 0;
+#if POLYSPEC_TRANSPARENT_MESH
+    // Mesh pixels that are behind the main sprite buffer get cleared instead
+    const uint inMainOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
+    const uint mainSeqNum0 = BitExtract(g_internalSpriteOut[inMainOffset + 0], 16, 16);
+    const uint mainSeqNum1 = BitExtract(g_internalSpriteOut[inMainOffset + 1], 16, 16);
+    const uint mainSeqNum2 = BitExtract(g_internalSpriteOut[inMainOffset + 2], 16, 16);
+    const uint mainSeqNum3 = BitExtract(g_internalSpriteOut[inMainOffset + 3], 16, 16);
+    hasPixel0 = hasPixel0 || mainSeqNum0 != 0;
+    hasPixel1 = hasPixel1 || mainSeqNum1 != 0;
+    hasPixel2 = hasPixel2 || mainSeqNum2 != 0;
+    hasPixel3 = hasPixel3 || mainSeqNum3 != 0;
+    const bool drawPixel0 = seqNum0 >= mainSeqNum0;
+    const bool drawPixel1 = seqNum1 >= mainSeqNum1;
+    const bool drawPixel2 = seqNum2 >= mainSeqNum2;
+    const bool drawPixel3 = seqNum3 >= mainSeqNum3;
+#else
+    const bool drawPixel0 = true;
+    const bool drawPixel1 = true;
+    const bool drawPixel2 = true;
+    const bool drawPixel3 = true;
+#endif
+    if (!hasPixel0 && !hasPixel1 && !hasPixel2 && !hasPixel3) {
         // Nothing written to these pixels
         return;
     }
+
+    // Clear internal outputs
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
     g_internalSpriteOut[inOffset + 2] = 0;
     g_internalSpriteOut[inOffset + 3] = 0;
 
-    const uint outOffset = inPos.x + inPos.y * fbSize.x + field * kVDP1FBRAMSize;
+    const uint outOffset = inPos.x + inPos.y * fbSize.x + (field + POLYSPEC_TRANSPARENT_MESH * 2) * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
-    if (counter0 != 0) {
+    if (hasPixel0) {
         fbramValue &= ~0xFFu;
-        fbramValue |= BitExtract(out0, 0, 8);
+        if (drawPixel0) {
+            fbramValue |= BitExtract(out0, 0, 8);
+        }
     }
-    if (counter1 != 0) {
+    if (hasPixel1) {
         fbramValue &= ~0xFF00u;
-        fbramValue |= BitExtract(out1, 0, 8) << 8u;
+        if (drawPixel1) {
+            fbramValue |= BitExtract(out1, 0, 8) << 8u;
+        }
     }
-    if (counter2 != 0) {
+    if (hasPixel2) {
         fbramValue &= ~0xFF0000u;
-        fbramValue |= BitExtract(out2, 0, 8) << 16u;
+        if (drawPixel2) {
+            fbramValue |= BitExtract(out2, 0, 8) << 16u;
+        }
     }
-    if (counter3 != 0) {
+    if (hasPixel3) {
         fbramValue &= ~0xFF000000u;
-        fbramValue |= BitExtract(out3, 0, 8) << 24u;
+        if (drawPixel3) {
+            fbramValue |= BitExtract(out3, 0, 8) << 24u;
+        }
     }
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
 
 void Merge16(uint2 pos, uint field) {
     const uint2 inPos = uint2(pos.x * 2, pos.y);
-    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + (field + POLYSPEC_TRANSPARENT_MESH * 2) * fbSize.x * fbSize.y;
 
-    // Read and clear internal outputs
+    // Read internal outputs
     const uint out0 = g_internalSpriteOut[inOffset + 0];
     const uint out1 = g_internalSpriteOut[inOffset + 1];
 
-    const uint counter0 = BitExtract(out0, 16, 16);
-    const uint counter1 = BitExtract(out1, 16, 16);
-    if (counter0 == 0 && counter1 == 0) {
+    // Get sequence numbers
+    uint seqNum0 = BitExtract(out0, 16, 16);
+    uint seqNum1 = BitExtract(out1, 16, 16);
+    bool hasPixel0 = seqNum0 != 0;
+    bool hasPixel1 = seqNum1 != 0;
+#if POLYSPEC_TRANSPARENT_MESH
+    // Mesh pixels that are behind the main sprite buffer get cleared instead
+    const uint inMainOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
+    const uint mainSeqNum0 = BitExtract(g_internalSpriteOut[inMainOffset + 0], 16, 16);
+    const uint mainSeqNum1 = BitExtract(g_internalSpriteOut[inMainOffset + 1], 16, 16);
+    hasPixel0 = hasPixel0 || mainSeqNum0 != 0;
+    hasPixel1 = hasPixel1 || mainSeqNum1 != 0;
+    const bool drawPixel0 = seqNum0 >= mainSeqNum0;
+    const bool drawPixel1 = seqNum1 >= mainSeqNum1;
+#else
+    const bool drawPixel0 = true;
+    const bool drawPixel1 = true;
+#endif
+    if (!hasPixel0 && !hasPixel1) {
         // Nothing written to these pixels
         return;
     }
+
+    // Clear internal outputs
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
 
-    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize;
+    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + (field + POLYSPEC_TRANSPARENT_MESH * 2) * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
-    if (counter0 != 0) {
+    if (hasPixel0) {
         fbramValue &= ~0xFFFFu;
-        fbramValue |= BitExtract(out0, 0, 16);
+        if (drawPixel0) {
+            fbramValue |= BitExtract(out0, 0, 16);
+        }
     }
-    if (counter1 != 0) {
+    if (hasPixel1) {
         fbramValue &= ~0xFFFF0000u;
-        fbramValue |= BitExtract(out1, 0, 16) << 16u;
+        if (drawPixel1) {
+            fbramValue |= BitExtract(out1, 0, 16) << 16u;
+        }
     }
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
 }
@@ -145,7 +206,7 @@ void Merge8(uint2 pos, uint field) {
 
 void Merge16(uint2 pos, uint field) {
     const uint2 inPos = uint2(pos.x * 2, pos.y);
-    const uint inOffset = inPos.x + inPos.y * fbSize.x + field * fbSize.x * fbSize.y;
+    const uint inOffset = inPos.x + inPos.y * fbSize.x + (field + POLYSPEC_TRANSPARENT_MESH * 2) * fbSize.x * fbSize.y;
 
     // Read and clear internal outputs
     const uint shift0 = min(g_internalSpriteOut[inOffset + 0], 5);
@@ -157,7 +218,7 @@ void Merge16(uint2 pos, uint field) {
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
 
-    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize;
+    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + (field + POLYSPEC_TRANSPARENT_MESH * 2) * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (shift0 != 0) {
         uint4 color = Uint16ToColor555(BitExtract(fbramValue, 0, 16));
