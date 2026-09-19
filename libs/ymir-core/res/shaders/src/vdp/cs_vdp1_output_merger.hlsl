@@ -52,7 +52,7 @@ static const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
 
-static const uint fbOffset = drawFB * kVDP1FBRAMSize;
+static const uint fbOffset = drawFB * kVDP1FBSize;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Mergers
@@ -84,7 +84,7 @@ void Merge8(uint2 pos, uint field) {
     g_internalSpriteOut[inOffset + 2] = 0;
     g_internalSpriteOut[inOffset + 3] = 0;
 
-    const uint outOffset = inPos.x + inPos.y * fbSize.x + field * kVDP1FBRAMSize * 2;
+    const uint outOffset = inPos.x + inPos.y * fbSize.x + field * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (counter0 != 0) {
         fbramValue &= ~0xFFu;
@@ -122,7 +122,7 @@ void Merge16(uint2 pos, uint field) {
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
 
-    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize * 2;
+    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (counter0 != 0) {
         fbramValue &= ~0xFFFFu;
@@ -157,7 +157,7 @@ void Merge16(uint2 pos, uint field) {
     g_internalSpriteOut[inOffset + 0] = 0;
     g_internalSpriteOut[inOffset + 1] = 0;
 
-    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize * 2;
+    const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + field * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (shift0 != 0) {
         uint4 color = Uint16ToColor555(BitExtract(fbramValue, 0, 16));
@@ -246,7 +246,7 @@ void Merge16(uint2 pos, uint field) {
     g_listHeads[inOffset + 1] = 0xFFFFFFFF;
 
     // Get base FBRAM value
-    const uint fbramAddress = (inPos.x + inPos.y * fbSize.x) * 2 + fbOffset + field * kVDP1FBRAMSize * 2;
+    const uint fbramAddress = (inPos.x + inPos.y * fbSize.x) * 2 + fbOffset + field * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(fbramAddress);
 
     // Modify

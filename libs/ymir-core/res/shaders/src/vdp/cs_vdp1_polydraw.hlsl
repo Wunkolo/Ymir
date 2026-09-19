@@ -505,7 +505,7 @@ void WriteOutput(int2 coord, OutData data) {
 
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
     const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
-    uint fbOffset = drawFB * kVDP1FBRAMSize;
+    uint fbOffset = drawFB * kVDP1FBSize;
 #endif
 
     // Interlace line selection
@@ -515,7 +515,7 @@ void WriteOutput(int2 coord, OutData data) {
                 return;
             }
 #if POLYSPEC_SHADING_MODE == POLYSPEC_SHADING_MODE_MSB
-            fbOffset += 2 * kVDP1FBRAMSize;
+            fbOffset += kVDP1FBRAMSize;
 #else
             outOffset += fbSize.x * fbSize.y;
 #endif
