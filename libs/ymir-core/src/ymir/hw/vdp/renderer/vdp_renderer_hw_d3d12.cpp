@@ -3841,15 +3841,17 @@ struct Direct3D12VDPRenderer::Impl {
             const D3D12RootSignature &rootSig = isMergerOIT ? vdp1.outputMergerOITRootSig : vdp1.outputMergerRootSig;
             const DescriptorRange &descs = isMergerOIT ? frameCtx.outputMergerOITDescs : frameCtx.outputMergerDescs;
             const VDP1Regs &regs1 = vdpState.regs1;
+            const VDP2Regs &regs2 = vdpState.regs2;
             const uint32 pixelsPerEntry = regs1.pixel8Bits ? 4u : 2u; // each entry is 32 bits
             const uint32 mergeW = regs1.fbSizeH / pixelsPerEntry;
             const uint32 mergeH = regs1.fbSizeV;
+            const uint32 mergeZ = regs2.TVMD.IsInterlaced() && enhancements.deinterlace ? 2 : 1;
             cmdList->SetPipelineState(frameCtx.outputMergerPSOs[vdp1.currOutputMergerShaderIndex].GetPointer());
             cmdList->SetComputeRootSignature(rootSig.GetPointer());
             cmdList->SetComputeRoot32BitConstants(0, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32),
                                                   &vdp1.cpuCommonRenderParams, 0);
             cmdList->SetComputeRootDescriptorTable(1, descs.gpuHandle);
-            cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, enhancements.deinterlace ? 2 : 1);
+            cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, mergeZ);
         }
 
         return {};
