@@ -3910,15 +3910,12 @@ struct Direct3D12VDPRenderer::Impl {
                 const uint8 bits = bitmapData[write.address >> 6u] >> (write.address & 63u);
                 write.andMask = 0;
                 for (uint32 j = 0; j < 4; ++j) {
-                    const uint32 shift = (j ^ 1u) * 8u; // TODO: ^1 should not be needed
+                    const uint32 shift = j * 8u;
                     if (((bits >> j) & 1u) == 0u) {
                         write.andMask |= (0xFFu << shift);
                     }
                 }
-                // TODO: this should be util::ReadBE<uint32>
-                write.orMask = 0;
-                write.orMask |= util::ReadBE<uint16>(&fb[write.address + 2]) << 16u;
-                write.orMask |= util::ReadBE<uint16>(&fb[write.address + 0]) << 0u;
+                write.orMask = util::ReadLE<uint32>(&fb[write.address]);
                 write.orMask &= ~write.andMask;
             }
         }
