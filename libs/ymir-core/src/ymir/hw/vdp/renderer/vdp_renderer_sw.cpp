@@ -892,7 +892,7 @@ FORCE_INLINE uint8 SoftwareVDPRenderer::VDP1GetDisplayFBIndex() const {
     return m_state.displayFB;
 }
 
-FORCE_INLINE std::array<SpriteFB, 2> &SoftwareVDPRenderer::VDP1GetRendererDrawFB(bool altFB) {
+FORCE_INLINE std::array<SpriteFB, 2> &SoftwareVDPRenderer::VDP1GetRendererFBRAM(bool altFB) {
     if (altFB) {
         return m_altFBRAM;
     } else if (m_threadedVDP1Rendering) {
@@ -1091,7 +1091,7 @@ FORCE_INLINE bool SoftwareVDPRenderer::VDP1PlotPixel(CoordS32 coord, const VDP1P
     fbOffset &= 0x3FFFF;
 
     const auto fbIndex = VDP1GetDisplayFBIndex() ^ 1;
-    auto &drawFB = VDP1GetRendererDrawFB(altFB)[fbIndex];
+    auto &drawFB = VDP1GetRendererFBRAM(altFB)[fbIndex];
     if (pixelParams.mode.msbOn) {
         // TODO: check correctness -- does it write only when (x&1)==0 or is it force-aligned like this?
         drawFB[fbOffset & ~1u] |= 0x80;
