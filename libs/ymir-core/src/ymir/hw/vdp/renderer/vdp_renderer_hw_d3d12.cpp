@@ -998,6 +998,8 @@ struct Direct3D12VDPRenderer::Impl {
         void *fbramDownloadBufferPtr = nullptr;
         /// @brief Current version of downloaded FBRAM.
         UINT64 fbramDownloadVersion = 0;
+        /// @brief Set by `VDP1DebugSyncFB` to lazily sync FBRAM when convenient.
+        std::atomic_bool fbramDebugSyncRequest{false};
 
         // ---------------------------------------------------------------------
 
@@ -3781,7 +3783,7 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     void VDP1DebugSyncFB() {
-        VDP1DownloadFBRAM();
+        vdp1.fbramDebugSyncRequest.store(true, std::memory_order_release);
     }
 
     void VDP1WriteFB(uint32 address, uint32 size) {
@@ -5845,6 +5847,12 @@ struct Direct3D12VDPRenderer::Impl {
         // VDP2 consumes VDP1 FBRAM, so it needs to be synced here
         if (auto result = VDP1FlushFBRAM(); !result) {
             devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
+        }
+
+        // If the frontend requested a VDP1 FBRAM sync via the debugger, do so now
+        bool expect = true;
+        if (vdp1.fbramDebugSyncRequest.compare_exchange_strong(expect, false)) {
+            VDP1DownloadFBRAM();
         }
     }
 
