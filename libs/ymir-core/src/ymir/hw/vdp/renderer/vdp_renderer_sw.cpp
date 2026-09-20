@@ -361,11 +361,12 @@ void SoftwareVDPRenderer::VDP1WriteFB(uint32 address, uint16 value) {
 
 template <mem_primitive_16 T>
 FORCE_INLINE void SoftwareVDPRenderer::VDP1WriteFBImpl(uint32 address, T value) {
-    if (m_enhancements.deinterlace) {
-        util::WriteBE<T>(&m_altFBRAM[m_state.displayFB ^ 1][address & 0x3FFFF], value);
-    }
     if (m_threadedVDP1Rendering) {
         m_vdp1RenderingContext.EnqueueEvent(VDP1RenderEvent::FBRAMWrite<T>(address, value));
+    } else {
+        if (m_enhancements.deinterlace && m_state.regs2.TVMD.IsInterlaced()) {
+            util::WriteBE<T>(&m_altFBRAM[m_state.displayFB ^ 1][address & 0x3FFFF], value);
+        }
     }
 }
 
@@ -617,17 +618,17 @@ void SoftwareVDPRenderer::VDP1RenderThread() {
                     VDP1DoEraseFramebuffer<true>(event.erase.cycles);
                 }
                 const auto fbIndex = VDP1GetDisplayFBIndex();
-                rctx.vdp1.mem.FBRAM[fbIndex] = m_state.mem1.FBRAM[fbIndex];
+                m_state.mem1.FBRAM[fbIndex] = rctx.vdp1.mem.FBRAM[fbIndex];
                 break;
             }
             case EvtType::SwapBuffers: {
-                const auto fbIndex = VDP1GetDisplayFBIndex() ^ 1;
+                const auto fbIndex = VDP1GetDrawFBIndex();
                 m_state.mem1.FBRAM[fbIndex] = rctx.vdp1.mem.FBRAM[fbIndex];
                 rctx.swapBuffersSignal.Set();
                 break;
             }
             case EvtType::EndDraw: {
-                const auto fbIndex = VDP1GetDisplayFBIndex() ^ 1;
+                const auto fbIndex = VDP1GetDrawFBIndex();
                 m_state.mem1.FBRAM[fbIndex] = rctx.vdp1.mem.FBRAM[fbIndex];
                 break;
             }
@@ -637,13 +638,24 @@ void SoftwareVDPRenderer::VDP1RenderThread() {
             case EvtType::VRAMWriteWord:
                 util::WriteBE<uint16>(&rctx.vdp1.mem.VRAM[event.write.address], event.write.value);
                 break;
-            case EvtType::FBRAMWriteByte:
-                rctx.vdp1.mem.FBRAM[VDP1GetDisplayFBIndex() ^ 1][event.write.address] = event.write.value;
+            case EvtType::FBRAMWriteByte: {
+                const auto fbIndex = VDP1GetDrawFBIndex();
+                rctx.vdp1.mem.FBRAM[fbIndex][event.write.address] = event.write.value;
+                m_state.mem1.FBRAM[fbIndex][event.write.address] = event.write.value;
+                if (m_enhancements.deinterlace && m_state.regs2.TVMD.IsInterlaced()) {
+                    m_altFBRAM[fbIndex][event.write.address] = event.write.value;
+                }
                 break;
-            case EvtType::FBRAMWriteWord:
-                util::WriteBE<uint16>(&rctx.vdp1.mem.FBRAM[VDP1GetDisplayFBIndex() ^ 1][event.write.address],
-                                      event.write.value);
+            }
+            case EvtType::FBRAMWriteWord: {
+                const auto fbIndex = VDP1GetDrawFBIndex();
+                util::WriteBE<uint16>(&rctx.vdp1.mem.FBRAM[fbIndex][event.write.address], event.write.value);
+                util::WriteBE<uint16>(&m_state.mem1.FBRAM[fbIndex][event.write.address], event.write.value);
+                if (m_enhancements.deinterlace && m_state.regs2.TVMD.IsInterlaced()) {
+                    util::WriteBE<uint16>(&m_altFBRAM[fbIndex][event.write.address], event.write.value);
+                }
                 break;
+            }
             case EvtType::RegWrite: rctx.vdp1.regs.Write<false>(event.write.address, event.write.value); break;
 
             case EvtType::PreSaveStateSync: rctx.preSaveSyncSignal.Set(); break;
@@ -892,13 +904,17 @@ FORCE_INLINE uint8 SoftwareVDPRenderer::VDP1GetDisplayFBIndex() const {
     return m_state.displayFB;
 }
 
-FORCE_INLINE std::array<SpriteFB, 2> &SoftwareVDPRenderer::VDP1GetRendererFBRAM(bool altFB) {
+FORCE_INLINE uint8 SoftwareVDPRenderer::VDP1GetDrawFBIndex() const {
+    return m_state.displayFB ^ 1;
+}
+
+FORCE_INLINE SpriteFB &SoftwareVDPRenderer::VDP1GetRendererFBRAM(bool altFB, uint8 fbIndex) {
     if (altFB) {
-        return m_altFBRAM;
+        return m_altFBRAM[fbIndex];
     } else if (m_threadedVDP1Rendering) {
-        return m_vdp1RenderingContext.vdp1.mem.FBRAM;
+        return m_vdp1RenderingContext.vdp1.mem.FBRAM[fbIndex];
     } else {
-        return m_state.mem1.FBRAM;
+        return m_state.mem1.FBRAM[fbIndex];
     }
 }
 
@@ -913,7 +929,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP1DoEraseFramebuffer(uint64 cycles) {
                                regs1.eraseWriteValueLatch, regs1.fbSizeH, regs1.fbSizeV, (regs1.pixel8Bits ? 8 : 16));
 
     const uint8 fbIndex = VDP1GetDisplayFBIndex();
-    auto &fb = m_state.mem1.FBRAM[fbIndex];
+    auto &fb = VDP1GetRendererFBRAM(false, fbIndex);
     auto &altFB = m_altFBRAM[fbIndex];
     [[maybe_unused]] auto &meshFB = m_meshFBRAM[0][fbIndex];
     [[maybe_unused]] auto &altMeshFB = m_meshFBRAM[1][fbIndex];
@@ -1090,8 +1106,8 @@ FORCE_INLINE bool SoftwareVDPRenderer::VDP1PlotPixel(CoordS32 coord, const VDP1P
     }
     fbOffset &= 0x3FFFF;
 
-    const auto fbIndex = VDP1GetDisplayFBIndex() ^ 1;
-    auto &drawFB = VDP1GetRendererFBRAM(altFB)[fbIndex];
+    const auto fbIndex = VDP1GetDrawFBIndex();
+    auto &drawFB = VDP1GetRendererFBRAM(altFB, fbIndex);
     if (pixelParams.mode.msbOn) {
         // TODO: check correctness -- does it write only when (x&1)==0 or is it force-aligned like this?
         drawFB[fbOffset & ~1u] |= 0x80;

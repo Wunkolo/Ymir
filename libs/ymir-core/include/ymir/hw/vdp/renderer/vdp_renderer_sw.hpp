@@ -659,8 +659,11 @@ private:
     // Retrieves the current index of the VDP1 display framebuffer.
     uint8 VDP1GetDisplayFBIndex() const;
 
+    // Retrieves the current index of the VDP1 draw framebuffer.
+    uint8 VDP1GetDrawFBIndex() const;
+
     // Retrieves a reference to the current VDP1 FBRAM in use by the renderer.
-    std::array<SpriteFB, 2> &VDP1GetRendererFBRAM(bool altFB);
+    SpriteFB &VDP1GetRendererFBRAM(bool altFB, uint8 fbIndex);
 
     // Erases the current VDP1 display framebuffer.
     template <bool countCycles>
