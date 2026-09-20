@@ -38,6 +38,8 @@ Introduces save state file version 14.
         - Determine double density mode
         - Get references to VDP1 registers
         - Shift/mask color bank values
+- VDP1/VDP2: Hardware-accelerated rendering is now available. Supported graphics backends:
+    - Direct3D 12 on Windows (@StrikerX3)
 
 ### Fixes
 
@@ -74,6 +76,7 @@ Introduces save state file version 14.
 - VDP1: Don't sync VDP1 FBRAM on debug reads. Fixes deadlock when viewing the framebuffer area in a memory viewer window.
 - VDP1: Force-align MSB write to 16-bit addresses when writing pixels with MSB enabled. Fixes deselected menu options being fully painted in black in Derby Analyst. (#587)
 - VDP1: Textured sprites with CMDSIZE.H=0 never fetch additional texels. Fixes glitched graphics in the scorecard of the shooting range in Policenauts.
+- VDP1-SW: Write back FBRAM writes from VDP1 renderer thread. Fixes glitched title screen in Waialae no Kiseki - Extra 36 Holes when using threaded VDP1 rendering. (#898)
 - VDP2: Avoid unintentional side effects on VDP2 EXTEN register when saving states. Fixes camera angles in Digital Dance Mix Vol. 1 - Namie Amuro.
 - VDP2: Disable color gradation if color RAM mode is not 0. Fixes the fog effect in The River of Dreams level in Astal. (#927)
 - VDP2: Fix coordinate latching on external latches. Fixes various Virtua Gun shot offset errors. (#787)
@@ -227,7 +230,6 @@ Uses save state file version 12.
 - VDP1: Add game-specific flag for skipping command processing if the top of the table is empty. Enable it exclusively for Sekai no Shasou kara - I Swiss-hen - Alps Tozantetsudou no Tabi. Fixes missing graphics in Gungriffon. (#810)
 - VDP1: Disable early polygon drawing termination when rendering polygons when user clipping mode is inverted. Fixes clipped polygons around the minimap in Machine Head (#767).
 - VDP1: Implement simple infinite loop detection. Fixes slowdown in the Mojave Desert stage (1-2) in Gale Racer.
-- VDP1-SW: Write back FBRAM writes from VDP1 renderer thread. Fixes glitched title screen in Waialae no Kiseki - Extra 36 Holes when using threaded VDP1 rendering. (#898)
 - VDP2: Apply color calculations to transparent sprite mesh on layer 0. Fixes stripes on ground plane in Gungriffon.
 - VDP2: Apply color offset to transparent sprite mesh on layer 0 in a separate step. Fixes missing spotlight in the Colonel battle in Mega Man X4. (#818)
 - VDP2: Fix VRAM access calculations when RBG1 is enabled. Fix missing car graphics regression in Gale Racer. (#359)
