@@ -59,7 +59,7 @@ uint ReadSprite8(uint address, uint field) {
 
 uint ReadSprite16(uint address, uint field) {
     address += kSpriteFBBaseOffset + field * kDeinterlaceFBBaseOffset;
-    return BitExtract(g_spriteFB.Load(address & ~3), (address & 2) * 8, 16);
+    return ByteSwap16(g_spriteFB.Load(address & ~3) >> ((address & 2) * 8));
 }
 
 uint ReadMesh8(uint address, uint field) {

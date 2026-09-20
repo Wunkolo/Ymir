@@ -24,7 +24,7 @@
 // Modify these to adjust IntelliSense highlighting
 #ifdef __INTELLISENSE__
 #define POLYSPEC_TRANSPARENT_MESH 1
-#define POLYSPEC_MERGE_MODE       0
+#define POLYSPEC_MERGE_MODE       2
 #endif
 
 // TODO: figure out how shadow and transparent pixels on the transparent mesh layer should be rendered
@@ -182,13 +182,13 @@ void Merge16(uint2 pos, uint field) {
     if (hasPixel0) {
         fbramValue &= ~0xFFFFu;
         if (drawPixel0) {
-            fbramValue |= BitExtract(out0, 0, 16);
+            fbramValue |= ByteSwap16(out0);
         }
     }
     if (hasPixel1) {
         fbramValue &= ~0xFFFF0000u;
         if (drawPixel1) {
-            fbramValue |= BitExtract(out1, 0, 16) << 16u;
+            fbramValue |= ByteSwap16(out1) << 16u;
         }
     }
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
@@ -219,19 +219,19 @@ void Merge16(uint2 pos, uint field) {
     const uint outOffset = (inPos.x + inPos.y * fbSize.x) * 2 + (field + POLYSPEC_TRANSPARENT_MESH * 2) * kVDP1FBRAMSize;
     uint fbramValue = g_fbramOut.Load(outOffset + fbOffset);
     if (shift0 != 0) {
-        uint4 color = Uint16ToColor555(BitExtract(fbramValue, 0, 16));
+        uint4 color = Uint16ToColor555(ByteSwap16(fbramValue));
         if (color.a != 0u) {
             color.rgb >>= shift0;
             fbramValue &= ~0xFFFFu;
-            fbramValue |= Color555ToUint16(color);
+            fbramValue |= ByteSwap16(Color555ToUint16(color));
         }
     }
     if (shift1 != 0) {
-        uint4 color = Uint16ToColor555(BitExtract(fbramValue, 16, 16));
+        uint4 color = Uint16ToColor555(ByteSwap16(fbramValue >> 16u));
         if (color.a != 0u) {
             color.rgb >>= shift1;
             fbramValue &= ~0xFFFF0000u;
-            fbramValue |= Color555ToUint16(color) << 16u;
+            fbramValue |= ByteSwap16(Color555ToUint16(color)) << 16u;
         }
     }
     g_fbramOut.Store(outOffset + fbOffset, fbramValue);
@@ -310,8 +310,8 @@ void Merge16(uint2 pos, uint field) {
 
     // Modify
     fbramValue =
-        (HalfTransparentBlend(BitExtract(fbramValue, 16, 16), heads[1]) << 16u) |
-         HalfTransparentBlend(BitExtract(fbramValue, 0, 16), heads[0]);
+        (ByteSwap16(HalfTransparentBlend(ByteSwap16(fbramValue >> 16u), heads[1])) << 16u) |
+         ByteSwap16(HalfTransparentBlend(ByteSwap16(fbramValue), heads[0]));
 
     // Write back
     g_fbramOut.Store(fbramAddress, fbramValue);
