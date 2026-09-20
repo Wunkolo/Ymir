@@ -3773,7 +3773,7 @@ struct Direct3D12VDPRenderer::Impl {
         const UINT64 fenceValue = computeFence.GetCompletedValue();
         if (vdp1.fbramDownloadVersion < fenceValue) {
             vdp1.fbramDownloadVersion = fenceValue;
-            memcpy(vdpState.spriteFB.data(), vdp1.fbramDownloadBufferPtr, kVDP1FBRAMSize * 2);
+            memcpy(vdpState.mem1.FBRAM.data(), vdp1.fbramDownloadBufferPtr, kVDP1FBRAMSize * 2);
         }
     }
 
@@ -3847,7 +3847,7 @@ struct Direct3D12VDPRenderer::Impl {
         }
 
         // Upload buffer
-        memcpy(alloc.data, vdpState.spriteFB.data(), kFrameSize);
+        memcpy(alloc.data, vdpState.mem1.FBRAM.data(), kFrameSize);
         cmdList->CopyBufferRegion(dstResource, kFrameSize * 0, uploadBufferPtr, alloc.offset, kFrameSize);
         if (enhancements.deinterlace) {
             cmdList->CopyBufferRegion(dstResource, kFrameSize * 1, uploadBufferPtr, alloc.offset, kFrameSize);
@@ -3893,7 +3893,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Because we're syncing FBRAM at the beginning of a VDP2 frame, the display framebuffer bit has already been
         // flipped by the VDP1 swap framebuffers operation. We'll have to pick the opposite buffer here to copy into.
-        auto &fb = vdpState.spriteFB[vdpState.displayFB ^ 1];
+        auto &fb = vdpState.mem1.FBRAM[vdpState.displayFB ^ 1];
 
         // Group modified FBRAM writes into 32-bit chunks
         std::vector<VDP1FBRAMWrite> writes{};

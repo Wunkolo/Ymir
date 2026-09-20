@@ -519,14 +519,14 @@ void serialize(Archive &ar, VDPSaveState &s, const uint32 version) {
     //   - eraseWriteValue = EWDR
     //   - eraseX1, eraseY1 = EWLR
     //   - eraseX3, eraseY3 = EWRR
-    //   - meshFB = filled with zeros
+    //   - meshFBRAM = filled with zeros
     // - Changed fields
     //   - erase -> doDisplayErase = true when erase && VBE=0, otherwise false
     // v5:
     // - New fields
     //   - erase = false
 
-    ar(s.VRAM1, s.VRAM2, s.CRAM, s.spriteFB, s.displayFB);
+    ar(s.VRAM1, s.VRAM2, s.CRAM, s.FBRAM, s.displayFB);
     if (version >= 7) {
         ar(s.vdp1State.timingPenalty);
         ar(s.regs1.FBCRChanged);
@@ -700,12 +700,12 @@ void serialize(Archive &ar, VDPSaveState &s, const uint32 version) {
             }
         }
         if (version >= 9) {
-            ar(rs.vdp1State.meshFB);
+            ar(rs.vdp1State.meshFBRAM);
         } else {
-            rs.vdp1State.meshFB[0][0].fill(0);
-            rs.vdp1State.meshFB[0][1].fill(0);
-            rs.vdp1State.meshFB[1][0].fill(0);
-            rs.vdp1State.meshFB[1][1].fill(0);
+            rs.vdp1State.meshFBRAM[0][0].fill(0);
+            rs.vdp1State.meshFBRAM[0][1].fill(0);
+            rs.vdp1State.meshFBRAM[1][0].fill(0);
+            rs.vdp1State.meshFBRAM[1][1].fill(0);
         }
 
         for (auto &state : rs.nbgLayerStates) {
