@@ -479,8 +479,6 @@ void VDP::SaveState(savestate::VDPSaveState &state) const {
     state.vdp1State.doVBlankErase = m_VDP1CtlState.doVBlankErase;
     state.vdp1State.spilloverCycles = m_VDP1CtlState.spilloverCycles;
     state.vdp1State.timingPenalty = m_VDP1TimingPenaltyCycles;
-
-    state.renderer.displayFB = m_state.displayFB;
 }
 
 bool VDP::ValidateState(const savestate::VDPSaveState &state) const {
@@ -504,8 +502,6 @@ void VDP::LoadState(const savestate::VDPSaveState &state) {
     m_VDP1CtlState.doVBlankErase = state.vdp1State.doVBlankErase;
     m_VDP1CtlState.spilloverCycles = state.vdp1State.spilloverCycles;
     m_VDP1TimingPenaltyCycles = state.vdp1State.timingPenalty;
-
-    m_state.displayFB = state.renderer.displayFB;
 
     UpdateResolution<true>();
 

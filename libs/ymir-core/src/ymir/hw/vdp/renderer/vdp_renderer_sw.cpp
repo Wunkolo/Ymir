@@ -314,7 +314,6 @@ void SoftwareVDPRenderer::LoadState(const savestate::VDPSaveState::VDPRendererSa
     }
 
     m_state.regs2.vcellScrollInc = state.vcellScrollInc;
-    m_vdp2RenderingContext.displayFB = state.displayFB;
 }
 
 // -----------------------------------------------------------------------------
@@ -696,10 +695,7 @@ void SoftwareVDPRenderer::VDP2RenderThread() {
             case EvtType::OddField: rctx.vdp2.regs.TVSTAT.ODD = event.oddField.odd; break;
             case EvtType::VDP2LatchTVMD: rctx.vdp2.regs.LatchTVMD(); break;
             case EvtType::VDP1EraseFramebuffer: rctx.eraseFramebufferReadySignal.Set(); break;
-            case EvtType::VDP1SwapFramebuffer:
-                rctx.displayFB ^= 1;
-                rctx.framebufferSwapSignal.Set();
-                break;
+            case EvtType::VDP1SwapFramebuffer: rctx.framebufferSwapSignal.Set(); break;
 
             case EvtType::VDP2BeginFrame: VDP2InitFrame(); break;
             case EvtType::VDP2UpdateEnabledBGs: VDP2UpdateEnabledBGs(); break;

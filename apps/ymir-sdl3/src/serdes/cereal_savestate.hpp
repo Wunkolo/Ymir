@@ -10,12 +10,11 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <string>
 
 namespace ymir::savestate {
 
 // Current save state format version.
-// Increment once per release if there are any changes to the serializers.
+// Increment once per release (including nightly builds!) if there are any changes to the serializers.
 // Remember to document every change!
 // Versions:
 //   1 = 0.1.0
@@ -31,8 +30,9 @@ namespace ymir::savestate {
 //  11 = 0.2.1
 //  12 = 0.3.0
 //  13 = 0.3.2
-//  14 = 0.4.0
-inline constexpr uint32 kVersion = 14;
+//  14 = 0.4.0-dev  (f192e30ef2d5bbaa1c3f78de63439a36fc26a423)
+//  15 = 0.4.0
+inline constexpr uint32 kVersion = 15;
 
 } // namespace ymir::savestate
 
@@ -484,21 +484,24 @@ void serialize(Archive &ar, VDPSaveState &s, const uint32 version) {
     //
     // VDPRendererSaveState
     // --------------------
+    // v15:
+    // - Removed fields
+    //   - displayFB
     // v12:
     // - New fields
     //   - vdp1State = new struct
     // - Removed fields
     //   - VDP1TimingPenalty -> moved to vdp1State as timingPenalty
     //   - VDP1FBCRChanged -> moved to regs1 as FBCRChanged
+    // v10:
+    // - Removed fields
+    //   - bool vdp1Done
     // v7:
     // - New fields
     //   - vramFetchers = (default values)
     // v4:
     // - New fields
     //   - vcellScrollInc = sizeof(uint32)
-    // v10:
-    // - Removed fields
-    //   - bool vdp1Done
     //
     // VDPRendererSaveState::VDP1RenderSaveState
     // -----------------------------------------
@@ -733,7 +736,10 @@ void serialize(Archive &ar, VDPSaveState &s, const uint32 version) {
         } else {
             rs.vcellScrollInc = sizeof(uint32);
         }
-        ar(rs.displayFB);
+        if (version <= 14) {
+            uint8 displayFB;
+            ar(displayFB);
+        }
         if (version <= 10) {
             bool vdp1Done;
             ar(vdp1Done);

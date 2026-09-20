@@ -532,13 +532,10 @@ private:
             alignas(16) std::array<Color888, kVDP2CRAMSize / sizeof(uint16)> CRAMCache;
         } vdp2;
 
-        uint8 displayFB;
-
         void Reset() {
             vdp2.regs.Reset();
             vdp2.mem.Reset();
             vdp2.CRAMCache.fill({.u32 = 0});
-            displayFB = 0;
         }
 
         void EnqueueEvent(VDP2RenderEvent &&event) {
