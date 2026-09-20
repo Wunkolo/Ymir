@@ -1279,6 +1279,10 @@ InterlaceMode VDP::Probe::GetInterlaceMode() const {
     return m_vdp.m_state.regs2.TVMD.LSMDn;
 }
 
+uint8 VDP::Probe::GetSpriteDisplayFB() const {
+    return m_vdp.m_state.displayFB;
+}
+
 const VDP1Regs &VDP::Probe::GetVDP1Regs() const {
     return m_vdp.m_state.regs1;
 }

@@ -37,6 +37,7 @@ void VDP2RegistersView::Display() {
     checkbox("Use back screen color as border color", regs2.TVMD.BDCLMD == 1);
     ImGui::Text("Resolution: %ux%u %s", reso.width, reso.height, kInterlaceNames[static_cast<uint8>(interlace)]);
     dualRadio("Display standard", "NTSC", "PAL", regs2.TVSTAT.PAL);
+    ImGui::Text("Vertical counter: %u", regs2.VCNT);
     dualRadio("Field", "Even", "Odd", regs2.TVSTAT.ODD);
     checkbox("Horizontal blanking", regs2.TVSTAT.HBLANK);
     checkbox("Vertical blanking", regs2.TVSTAT.VBLANK);

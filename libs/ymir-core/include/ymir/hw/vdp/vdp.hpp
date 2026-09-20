@@ -526,6 +526,7 @@ public:
 
         [[nodiscard]] Dimensions GetResolution() const;
         [[nodiscard]] InterlaceMode GetInterlaceMode() const;
+        [[nodiscard]] uint8 GetSpriteDisplayFB() const;
 
         [[nodiscard]] const VDP1Regs &GetVDP1Regs() const;
         [[nodiscard]] const VDP2Regs &GetVDP2Regs() const;

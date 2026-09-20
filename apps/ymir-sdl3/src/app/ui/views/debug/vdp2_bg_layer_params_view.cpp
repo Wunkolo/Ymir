@@ -27,22 +27,6 @@ void VDP2BGLayerParamsView::Display() {
         }
     };
 
-    bool dispEnable = regs2.TVMD.DISP;
-    ImGui::Checkbox("Display enabled", &dispEnable);
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::Text("VCNT: %u", regs2.ReadVCNT());
-
-    auto [width, height] = probe.GetResolution();
-    auto interlaceMode = probe.GetInterlaceMode();
-
-    static constexpr const char *kInterlaceNames[]{"progressive", "(invalid)", "single-density interlace",
-                                                   "double-density interlace"};
-
-    ImGui::TextUnformatted("Resolution:");
-    ImGui::SameLine();
-    ImGui::Text("%ux%u %s", width, height, kInterlaceNames[static_cast<uint8>(interlaceMode)]);
-
     if (ImGui::BeginTable("layers", 7, ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableSetupColumn("");
         ImGui::TableSetupColumn("NBG0", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
