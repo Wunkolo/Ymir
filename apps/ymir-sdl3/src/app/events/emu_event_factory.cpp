@@ -100,6 +100,7 @@ EmuEvent SwitchVDPRenderer(bool verbose) {
                 if (auto *dx12Ctx = gfxCtx.As<gfx::Direct3D12GraphicsContext>()) {
                     auto result = vdp.UseDirect3D12Renderer(dx12Ctx->GetDevice());
                     if (result) {
+                        ctx.screen.frameReadyEvent.Set(); // unblock main thread in case video sync is enabled
                         notifySuccess("Direct3D 12 renderer initialized successfully");
                         return;
                     }

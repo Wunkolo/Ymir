@@ -29,10 +29,11 @@ void VideoSettingsView::Display() {
 
     widgets::settings::video::GraphicsBackendCombo(m_context);
     widgets::settings::video::GraphicsAdapterCombo(m_context);
-#ifdef Ymir_LOCAL_BUILD // Hide this option so that users don't complain that it doesn't work
     widgets::settings::video::UseHardwareAcceleration(m_context);
-    ImGui::TextColored(m_context.colors.notice, "Hardware acceleration is not ready for public release yet.");
-#endif
+    ImGui::TextColored(
+        m_context.colors.notice,
+        "Hardware acceleration is currently in development. You may encounter bugs, glitches and performance issues.\n"
+        "Only Direct3D12 is supported at the moment. Other backends will be supported in the future.");
 
     // -----------------------------------------------------------------------------------------------------------------
 

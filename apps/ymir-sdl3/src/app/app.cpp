@@ -1363,7 +1363,9 @@ void App::RunEmulator() {
 
         // Configure video sync
         const bool fullScreen = settings.video.fullScreen;
-        const bool videoSync = fullScreen ? settings.video.syncInFullscreenMode : settings.video.syncInWindowedMode;
+        const bool videoSync =
+            !vdp.GetRenderer().IsHardwareRenderer() && // TODO: fix video sync with hardware renderers
+            (fullScreen ? settings.video.syncInFullscreenMode : settings.video.syncInWindowedMode);
         screen.videoSync = videoSync && !m_context.paused && m_context.emuSpeed.limitSpeed;
 
         const double frameIntervalAdjustFactor = 0.2; // how much adjustment is applied to the frame interval
