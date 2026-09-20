@@ -3893,7 +3893,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Because we're syncing FBRAM at the beginning of a VDP2 frame, the display framebuffer bit has already been
         // flipped by the VDP1 swap framebuffers operation. We'll have to pick the opposite buffer here to copy into.
-        auto &fb = vdpState.mem1.FBRAM[vdpState.displayFB ^ 1];
+        auto &fb = vdpState.mem1.FBRAM[vdpState.fbIndex.draw];
 
         // Group modified FBRAM writes into 32-bit chunks
         std::vector<VDP1FBRAMWrite> writes{};
@@ -3994,7 +3994,7 @@ struct Direct3D12VDPRenderer::Impl {
         FrameContext &frameCtx = frames.GetCurrentFrame();
 
         VDP1UpdateCommonRenderParams();
-        vdp1.cpuCommonRenderParams.displayParams.drawFB = vdpState.displayFB;
+        vdp1.cpuCommonRenderParams.displayParams.drawFB = vdpState.fbIndex.display;
 
         // Transition FBRAM to UAV usage
         barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -4282,7 +4282,7 @@ struct Direct3D12VDPRenderer::Impl {
         displayParams.dblInterlaceEnable = regs1.dblInterlaceEnable;
         displayParams.dblInterlaceDrawLine = regs1.dblInterlaceDrawLine;
         displayParams.evenOddCoordSelect = regs1.evenOddCoordSelect;
-        displayParams.drawFB = vdpState.displayFB ^ 1u;
+        displayParams.drawFB = vdpState.fbIndex.draw;
 
         params.enhancements.deinterlace = enhancements.deinterlace;
         params.enhancements.transparentMeshes = enhancements.transparentMeshes;
@@ -5376,7 +5376,7 @@ struct Direct3D12VDPRenderer::Impl {
         params.spriteParams.useSpriteWindow = regs2.spriteParams.useSpriteWindow;
         params.spriteParams.windowEnabled = regs2.spriteParams.spriteWindowEnabled;
         params.spriteParams.windowInverted = regs2.spriteParams.spriteWindowInverted;
-        params.spriteParams.displayFB = vdpState.displayFB;
+        params.spriteParams.displayFB = vdpState.fbIndex.display;
 
         params.spritePriosRatios.x = 0;
         params.spritePriosRatios.y = 0;
