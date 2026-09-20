@@ -12,64 +12,21 @@ This is mandatory to make Ymir work.
 If those didn't help, follow the instructions below.
 
 
-## Ymir fails to launch, crashes right away or displays a big "fatal error" popup
+## Games don't boot or get stuck on a black screen
 
-Windows users: install the [Microsoft Visual C++ Redistributable package](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) ([x86_64 installer](https://aka.ms/vc14/vc_redist.x64.exe), [AArch64/ARM64 installer](https://aka.ms/vc14/vc_redist.arm64.exe)) before launching Ymir. Installing other software might replace important system files with older versions that are incompatible with the emulator. As stated in the [README](README.md), this is **mandatory** to prevent early crashes.
+Ymir is compatible with about 94% of the Saturn's game catalog at the moment. Check the [official compatibility list](https://docs.google.com/spreadsheets/d/1SLZzL9LelSlpEmTKy8cjaQnE7mew2uW1rfCgcekO58Q/edit?usp=sharing) for details - some games may require additional settings or may fail to boot under some circumstances (notably, Die Hard Trilogy with any cartridge inserted).
 
-If the emulator is crashing early:
-- Make sure to download a version compatible with your CPU. The AVX2 version requires newer, usually more powerful CPUs, so if you have a Core i3 or i5 from older generations (3xxx or less), a Pentium or a Celeron, the first thing to try is to test the SSE2 version instead.
-- Ymir specifically requires the default audio output device to be present upon startup. If you set your headphones as the default device, ensure they're plugged in before launching the emulator.
-
-If you get the "fatal error" popup, you encountered a critical bug in the application. The best course of action is to collect a memory dump which can pinpoint the exact piece of code that caused the problem.
-
-> [!IMPORTANT]
-> To collect a memory dump, you **must use a nightly build** as they include debug symbols needed to make these dumps useful.
->
-> While sharing the dump, **mention the full Ymir version string** (copied from the Help > About window) and **whether you're using the SSE2, AVX2 or ARM64/NEON version**.
->
-> When you encounter a fatal error, **leave the popup open** as you follow the instructions for your operating system below.
-
-### Windows
-
-Follow these steps to collect and share a minidump:
-1. Download ProcDump: https://learn.microsoft.com/en-us/sysinternals/downloads/procdump.
-2. Open a Command Prompt window (cmd.exe), navigate to the folder where you downloaded ProcDump (`cd <path-to-folder>`) and run `procdump ymir-sdl3.exe`.
-3. Open the folder from which you ran the command (you can run `start .` from the Command Prompt to open an Explorer window on that directory). There should be a file named `ymir-sdl3.exe_<date>_<time>.dmp`. Compress that and share it. This file contains a minimal dump of the program which can be used by developers to figure out where exactly the emulator crashed.
-   - For developers: the PDBs can be found attached to the [nightly release workflow](https://github.com/ymir-emu/Ymir/actions/workflows/nightly-release.yaml).
-
-### Linux, macOS, FreeBSD
-
-1. Enable core dumps temporarily (if you haven't already enabled them system-wide):
-    ```sh
-    ulimit -c unlimited
-    ```
-2. Run the emulator from the same shell session.
-3. When the crash occurs, open a new shell and collect the dump:
-    1. Find the PID of the process:
-
-        ```sh
-        pgrep ymir-sdl3
-        ```
-        or:
-        ```sh
-        ps a | grep ymir-sdl3
-        ```
-    2. Generate the core dump:
-
-        Linux:
-        ```sh
-        gcore -o ymir.dmp <pid>
-        ```
-        FreeBSD:
-        ```sh
-        gcore -c ymir.dmp <pid>
-        ```
-        or:
-        ```sh
-        kill -6 <PID>
-        ```
-        NOTE: `kill -6` sends a `SIGABRT` signal to the process, causing the core dump to be saved to the default core dumps location in your system.
-    3. Compress and upload the dump file.
+Some things to try:
+- Hard reset a few times (Ctrl+R by default)
+- Tweak these settings and hard reset:
+    - In **System**:
+        - Enable or disable **Emulate SH-2 cache** - some games are extremely sensitive to timings or may use features that require proper cache emulation to work.
+        - Reset **SH-2 clock factor** to 100%. Bug reports where this option is not at the default value **will be rejected**.
+    - In **CD block**:
+        - Enable or disable **Use low-level CD Block emulation**. This is more CPU intensive and may fix some games but break others.
+        - Change **CD read speed**. Usually the default value of **2x** works, but some games may get past the black screen with a higher setting.
+- Redump your disc with a Redump method. See [this guide](https://dumping.guide/discs/general), and Redump's disc dumping guides with [MPF](https://wiki.redump.info/Disc_Dumping_Guide_(MPF)) and [redumper CLI](https://wiki.redump.info/Dumping_Guide_(redumper_CLI)).
+- Prefer BIN/CUE image files - they are better suited for Saturn games. MDF/MDS and CCD/IMG may also work. CHD has audio track issues with a handful of games but they generally boot fine. ISO is generally only used by homebrew apps.
 
 
 ## "No IPL ROM found" message when loading any game
@@ -161,6 +118,66 @@ On Windows, dxdiag information is very useful:
 - Run `dxdiag`
 - Click **Save All Information...** and save DxDiag.txt
 - Include DxDiag.txt in the issue
+
+
+## Ymir fails to launch, crashes right away or displays a big "fatal error" popup
+
+Windows users: install the [Microsoft Visual C++ Redistributable package](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) ([x86_64 installer](https://aka.ms/vc14/vc_redist.x64.exe), [AArch64/ARM64 installer](https://aka.ms/vc14/vc_redist.arm64.exe)) before launching Ymir. Installing other software might replace important system files with older versions that are incompatible with the emulator. As stated in the [README](README.md), this is **mandatory** to prevent early crashes.
+
+If the emulator is crashing early:
+- Make sure to download a version compatible with your CPU. The AVX2 version requires newer, usually more powerful CPUs, so if you have a Core i3 or i5 from older generations (3xxx or less), a Pentium or a Celeron, the first thing to try is to test the SSE2 version instead.
+- Ymir specifically requires the default audio output device to be present upon startup. If you set your headphones as the default device, ensure they're plugged in before launching the emulator.
+
+If you get the "fatal error" popup, you encountered a critical bug in the application. The best course of action is to collect a memory dump which can pinpoint the exact piece of code that caused the problem.
+
+> [!IMPORTANT]
+> To collect a memory dump, you **must use a nightly build** as they include debug symbols needed to make these dumps useful.
+>
+> While sharing the dump, **mention the full Ymir version string** (copied from the Help > About window) and **whether you're using the SSE2, AVX2 or ARM64/NEON version**.
+>
+> When you encounter a fatal error, **leave the popup open** as you follow the instructions for your operating system below.
+
+### Windows
+
+Follow these steps to collect and share a minidump:
+1. Download ProcDump: https://learn.microsoft.com/en-us/sysinternals/downloads/procdump.
+2. Open a Command Prompt window (cmd.exe), navigate to the folder where you downloaded ProcDump (`cd <path-to-folder>`) and run `procdump ymir-sdl3.exe`.
+3. Open the folder from which you ran the command (you can run `start .` from the Command Prompt to open an Explorer window on that directory). There should be a file named `ymir-sdl3.exe_<date>_<time>.dmp`. Compress that and share it. This file contains a minimal dump of the program which can be used by developers to figure out where exactly the emulator crashed.
+   - For developers: the PDBs can be found attached to the [nightly release workflow](https://github.com/ymir-emu/Ymir/actions/workflows/nightly-release.yaml).
+
+### Linux, macOS, FreeBSD
+
+1. Enable core dumps temporarily (if you haven't already enabled them system-wide):
+    ```sh
+    ulimit -c unlimited
+    ```
+2. Run the emulator from the same shell session.
+3. When the crash occurs, open a new shell and collect the dump:
+    1. Find the PID of the process:
+
+        ```sh
+        pgrep ymir-sdl3
+        ```
+        or:
+        ```sh
+        ps a | grep ymir-sdl3
+        ```
+    2. Generate the core dump:
+
+        Linux:
+        ```sh
+        gcore -o ymir.dmp <pid>
+        ```
+        FreeBSD:
+        ```sh
+        gcore -c ymir.dmp <pid>
+        ```
+        or:
+        ```sh
+        kill -6 <PID>
+        ```
+        NOTE: `kill -6` sends a `SIGABRT` signal to the process, causing the core dump to be saved to the default core dumps location in your system.
+    3. Compress and upload the dump file.
 
 
 ## General issues on Windows
