@@ -985,10 +985,8 @@ struct Direct3D12VDPRenderer::Impl {
         /// @brief FBRAM buffer UAV (offline).
         DescriptorRange fbramUAV;
 
-        /// @brief FBRAM dirty bitmap (byte level).
-        util::DirtyBitmap<kVDP1FBRAMSize> fbramByteDirty;
-        /// @brief FBRAM dirty bitmap (32-bit word level).
-        util::DirtyBitmap<kVDP1FBRAMSize / sizeof(uint32)> fbramWordDirty;
+        /// @brief FBRAM dirty bitmap.
+        util::DirtyBitmap<kVDP1FBRAMSize> fbramDirty;
         /// @brief FBRAM writes buffer.
         D3D12Resource fbramWritesBuffer;
         /// @brief FBRAM writes buffer SRV (offline).
@@ -3788,9 +3786,8 @@ struct Direct3D12VDPRenderer::Impl {
 
     void VDP1WriteFB(uint32 address, uint32 size) {
         for (uint32 i = 0; i < size; ++i) {
-            vdp1.fbramByteDirty.Set(address + i);
+            vdp1.fbramDirty.Set(address + i);
         }
-        vdp1.fbramWordDirty.Set(address / sizeof(uint32));
     }
 
     [[nodiscard]] util::VoidResult<> VDP1FlushVRAM() {
@@ -3874,14 +3871,13 @@ struct Direct3D12VDPRenderer::Impl {
         }
 
         // No longer dirty
-        vdp1.fbramByteDirty.ClearAll();
-        vdp1.fbramWordDirty.ClearAll();
+        vdp1.fbramDirty.ClearAll();
 
         return {};
     }
 
     [[nodiscard]] util::VoidResult<> VDP1FlushFBRAM() {
-        if (!vdp1.fbramWordDirty) {
+        if (!vdp1.fbramDirty) {
             return {};
         }
 
@@ -3898,14 +3894,14 @@ struct Direct3D12VDPRenderer::Impl {
         // Group modified FBRAM writes into 32-bit chunks
         std::vector<VDP1FBRAMWrite> writes{};
         size_t pos, count = 0;
-        const uint64 *bitmapData = vdp1.fbramByteDirty.GetData();
-        for (pos = vdp1.fbramWordDirty.FindNext(count); pos < vdp1.fbramWordDirty.Size();
-             pos = vdp1.fbramWordDirty.FindNext(count, pos + count)) {
-            const uint32 baseAddress = pos * sizeof(uint32);
+        const uint64 *bitmapData = vdp1.fbramDirty.GetData();
+        for (pos = vdp1.fbramDirty.FindNextGroup<4>(count); pos < vdp1.fbramDirty.Size();
+             pos = vdp1.fbramDirty.FindNextGroup<4>(count, pos + count)) {
+            const uint32 baseAddress = pos;
 
-            for (size_t i = 0; i < count; ++i) {
+            for (size_t i = 0; i < count; i += 4) {
                 VDP1FBRAMWrite &write = writes.emplace_back();
-                write.address = baseAddress + i * 4u;
+                write.address = baseAddress + i;
 
                 const uint8 bits = bitmapData[write.address >> 6u] >> (write.address & 63u);
                 write.andMask = 0;
@@ -3919,8 +3915,7 @@ struct Direct3D12VDPRenderer::Impl {
                 write.orMask &= ~write.andMask;
             }
         }
-        vdp1.fbramWordDirty.ClearAll();
-        vdp1.fbramByteDirty.ClearAll();
+        vdp1.fbramDirty.ClearAll();
 
         assert(!writes.empty());
 

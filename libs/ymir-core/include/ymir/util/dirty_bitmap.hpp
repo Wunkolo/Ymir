@@ -133,6 +133,74 @@ struct DirtyBitmap {
         return numBits;
     }
 
+    /// @brief Finds the next sequence of bit groups with at least one bit set from the starting offset (inclusive).
+    /// @tparam N the size of the bit cluster. Must be a power of two not greater than 64
+    /// @param[in] offset the starting offset, inclusive, rounded down to the nearest multiple of N
+    /// @param[out] outSetCount receives the number of bits set in a row
+    /// @return the offset to the next sequence of set bits, or `numBits` if not found.
+    template <size_t N>
+        requires(bit::is_power_of_two(N) && N < sizeof(TEntry) * 8u)
+    size_t FindNextGroup(size_t &outSetCount, size_t offset = 0) {
+        static constexpr TEntry kMask = (1ull << N) - 1ull;
+        offset &= ~(N - 1u);
+        if (offset >= numBits) {
+            return numBits;
+        }
+        TEntry accumNonEmpty = 0;
+        size_t i = offset >> kEntryShift;
+        TEntry entry = m_bitmap[i] >> (offset & kEntryMask);
+        TEntry remaining = std::min<TEntry>(kBitsPerEntry - (offset & kEntryMask), numBits);
+        while (i < kNumEntries) {
+            // Zeros search phase
+            while (entry == 0) {
+                offset += remaining;
+                ++i;
+                if (i >= kNumEntries) {
+                    break;
+                }
+                entry = m_bitmap[i];
+                remaining = kBitsPerEntry;
+                continue;
+            }
+            if (i >= kNumEntries) {
+                break;
+            }
+
+            const TEntry zeroClusters = std::min<TEntry>(std::countr_zero(entry), remaining) / N;
+            offset += zeroClusters * N;
+            remaining -= zeroClusters * N;
+            entry >>= zeroClusters * N;
+
+            // Non-zeros search phase
+            while (true) {
+                while (remaining > 0) {
+                    const TEntry value = entry & kMask;
+                    if (value == 0) {
+                        break;
+                    }
+                    accumNonEmpty += N;
+                    entry >>= N;
+                    remaining -= N;
+                }
+                if (remaining > 0) {
+                    outSetCount = accumNonEmpty;
+                    return offset;
+                }
+                ++i;
+                if (i >= kNumEntries) {
+                    break;
+                }
+                entry = m_bitmap[i];
+                remaining = kBitsPerEntry;
+            }
+        }
+        if (accumNonEmpty != 0) {
+            outSetCount = accumNonEmpty;
+            return offset;
+        }
+        return numBits;
+    }
+
     /// @brief Returns a pointer to the raw data of this bitmap.
     /// @return a pointer to the raw bitmap
     const TEntry *GetData() const {
