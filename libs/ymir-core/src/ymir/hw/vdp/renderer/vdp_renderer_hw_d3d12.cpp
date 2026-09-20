@@ -3889,7 +3889,9 @@ struct Direct3D12VDPRenderer::Impl {
                                         D3D12_BARRIER_ACCESS_COPY_DEST);
         barrierTracker.Flush(cmdList);
 
-        auto &fb = vdpState.spriteFB[vdpState.displayFB];
+        // Because we're syncing FBRAM at the beginning of a VDP2 frame, the display framebuffer bit has already been
+        // flipped by the VDP1 swap framebuffers operation. We'll have to pick the opposite buffer here to copy into.
+        auto &fb = vdpState.spriteFB[vdpState.displayFB ^ 1];
 
         // Group modified FBRAM writes into 32-bit chunks
         std::vector<VDP1FBRAMWrite> writes{};
@@ -4024,11 +4026,6 @@ struct Direct3D12VDPRenderer::Impl {
             devlog::warn<grp::dx12_vdp1>("VDP1 span submission failed: {}", spanResult.Error().message);
         }
 
-        // Flush FBRAM writes
-        if (auto result = VDP1FlushFBRAM(); !result) {
-            devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
-        }
-
         // Download FBRAM
         barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_COPY_SOURCE,
                                         D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_SOURCE);
@@ -4107,9 +4104,6 @@ struct Direct3D12VDPRenderer::Impl {
 
         if (auto result = VDP1FlushVRAM(); !result) {
             devlog::warn<grp::dx12_vdp1>("VDP1 VRAM flush failed: {}", result.Error().message);
-        }
-        if (auto result = VDP1FlushFBRAM(); !result) {
-            devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
         }
 
         ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
@@ -5847,6 +5841,11 @@ struct Direct3D12VDPRenderer::Impl {
         VDP2InitNBGs();
 
         VDP2UpdateState();
+
+        // VDP2 consumes VDP1 FBRAM, so it needs to be synced here
+        if (auto result = VDP1FlushFBRAM(); !result) {
+            devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
+        }
     }
 
     void VDP2RenderLayerLines(uint32 y) {
