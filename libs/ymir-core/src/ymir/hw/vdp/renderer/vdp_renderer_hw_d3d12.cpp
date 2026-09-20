@@ -3898,6 +3898,7 @@ struct Direct3D12VDPRenderer::Impl {
         // Group modified FBRAM writes into 32-bit chunks
         std::vector<VDP1FBRAMWrite> writes{};
         size_t pos, count = 0;
+        const uint64 *bitmapData = vdp1.fbramByteDirty.GetData();
         for (pos = vdp1.fbramWordDirty.FindNext(count); pos < vdp1.fbramWordDirty.Size();
              pos = vdp1.fbramWordDirty.FindNext(count, pos + count)) {
             const uint32 baseAddress = pos * sizeof(uint32);
@@ -3905,17 +3906,20 @@ struct Direct3D12VDPRenderer::Impl {
             for (size_t i = 0; i < count; ++i) {
                 VDP1FBRAMWrite &write = writes.emplace_back();
                 write.address = baseAddress + i * 4u;
-                write.andMask = 0xFFFFFFFF;
-                write.orMask = 0;
 
+                const uint8 bits = bitmapData[write.address >> 6u] >> (write.address & 63u);
+                write.andMask = 0;
                 for (uint32 j = 0; j < 4; ++j) {
-                    const uint32 address = write.address + j;
-                    const uint32 shift = (j ^ 1u) * 8u;
-                    if (vdp1.fbramByteDirty.Get(address)) {
-                        write.andMask &= ~(0xFFu << shift);
-                        write.orMask |= fb[address] << shift;
+                    const uint32 shift = (j ^ 1u) * 8u; // TODO: ^1 should not be needed
+                    if (((bits >> j) & 1u) == 0u) {
+                        write.andMask |= (0xFFu << shift);
                     }
                 }
+                // TODO: this should be util::ReadBE<uint32>
+                write.orMask = 0;
+                write.orMask |= util::ReadBE<uint16>(&fb[write.address + 2]) << 16u;
+                write.orMask |= util::ReadBE<uint16>(&fb[write.address + 0]) << 0u;
+                write.orMask &= ~write.andMask;
             }
         }
         vdp1.fbramWordDirty.ClearAll();
