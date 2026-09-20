@@ -716,16 +716,15 @@ uint4 FetchCharacterPixel(const BaseBGParams params, Character ch, uint2 dotPos,
     return FetchPixel(params, baseAddress, dotPos, 8, false, ch.palNum, ch.specColorCalc, ch.specPriority);
 }
 
-uint4 FetchBitmapPixel(const BaseBGParams params, uint2 scrollPos) {
+uint4 FetchBitmapPixel(const BaseBGParams params, uint bitmapBaseAddress, uint2 scrollPos) {
     const uint2 bitmapSize = params.bitmapSize;
 
     const uint2 dotPos = scrollPos & (bitmapSize - 1u);
-    const uint baseAddress = params.bitmapBaseAddress;
     const uint palNum = params.supplPalNum;
     const bool specColorCalc = params.supplSpecialColorCalc;
     const uint specPriority = params.supplSpecialPriority;
 
-    return FetchPixel(params, baseAddress, dotPos, bitmapSize.x, true, palNum, specColorCalc, specPriority);
+    return FetchPixel(params, bitmapBaseAddress, dotPos, bitmapSize.x, true, palNum, specColorCalc, specPriority);
 }
 
 uint4 FetchScrollBGPixel(const BaseBGParams params, uint2 scrollPos, uint2 pageShift, bool rot, uint pageBaseAddresses[16]) {
@@ -891,7 +890,7 @@ uint4 DrawNBG(uint2 pos, // pixel coordinates
 
     const bool bitmap = params.base.bitmap;
     if (bitmap) {
-        return FetchBitmapPixel(params.base, scrollPos);
+        return FetchBitmapPixel(params.base, params.base.bitmapBaseAddress, scrollPos);
     } else {
         const uint2 plane = (scrollPos >> (9u + pageShift)) & 1u;
         const uint pageBaseAddress = params.pageBaseAddresses[plane.x | (plane.y << 1u)];
@@ -1059,7 +1058,7 @@ uint4 DrawBitmapRBG(uint2 pos, uint index, uint rotSel, uint2 scrollPos) {
     if (all(scrollPos < scrollSize) || usingRepeat) {
         StoreRotationLineColorData(pos, rotPos, index, rotSel);
 
-        return FetchBitmapPixel(params.base, scrollPos);
+        return FetchBitmapPixel(params.base, g_layerRenderParams[0].rbg[rotSel].base.bitmapBaseAddress, scrollPos);
     }
 
     return kTransparentPixel;
