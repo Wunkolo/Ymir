@@ -3968,7 +3968,7 @@ struct Direct3D12VDPRenderer::Impl {
         vdp1.cpuEraseParams.coords.y3 = std::min<uint32>(regs1.eraseY3Latch, maxV);
         vdp1.cpuEraseParams.coords.scaleV = scaleV;
 
-        vdp1.cpuEraseParams.erase.writeValue = regs1.eraseWriteValueLatch;
+        vdp1.cpuEraseParams.erase.writeValue = bit::byte_swap<uint16>(regs1.eraseWriteValueLatch);
         vdp1.cpuEraseParams.erase.addressShift = regs1.eraseOffsetShift - 8;
 
         vdp1.cpuEraseParams.vblank.enable = cycles != 0;
