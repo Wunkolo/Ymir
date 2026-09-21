@@ -200,6 +200,9 @@ struct Direct3D12GraphicsContext::Impl {
 
     struct DisplayFrameContext {
         TextureID textureID;
+        D3D12Resource readbackTexture;
+        void *readbackTexturePtr = nullptr;
+        size_t readbackTextureSize = 0;
 
         std::atomic<ID3D12Fence *> computeFence; // Compute fence to be waited on
         std::atomic<UINT64> computeFenceValue;   // Value to wait for
@@ -371,6 +374,8 @@ struct Direct3D12GraphicsContext::Impl {
             static constexpr DXGI_FORMAT kFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
             DisplayFrameContext &frameCtx = displayFrames[n];
+
+            // Create the hardware texture
             const Texture2DSpec spec{
                 .width = ymir::vdp::kMaxResH,
                 .height = ymir::vdp::kMaxResV,
@@ -385,9 +390,28 @@ struct Direct3D12GraphicsContext::Impl {
                     fmt::format("Failed to create display output #{} texture: {}", n, textureResult.Error().message)};
             }
             frameCtx.textureID = texIDMgr.GetNextTextureID();
-            textures.insert({frameCtx.textureID, textureResult.Value()});
+            auto [itDispTex, ok] = textures.insert({frameCtx.textureID, textureResult.Value()});
+            assert(ok);
 
-            // Transition to COPY_DEST if using enhanced barriers
+            // Create the readback texture
+            auto builder = frameCtx.readbackTexture.BufferBuilder(itDispTex->second.uploadBufferSize);
+            builder.HeapType(D3D12_HEAP_TYPE_READBACK);
+            builder.InitialState(D3D12_RESOURCE_STATE_COPY_DEST);
+            if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
+                return util::ErrorMessage{fmt::format(
+                    "Failed to create display output readback texture #{}, error code {:X}", n, (uint32)hr)};
+            }
+            if (HRESULT hr = frameCtx.readbackTexture->Map(0, nullptr, &frameCtx.readbackTexturePtr); FAILED(hr)) {
+                return util::ErrorMessage{
+                    fmt::format("Failed to map display output readback texture #{}, error code {:X}", n, (uint32)hr)};
+            }
+            frameCtx.readbackTextureSize = itDispTex->second.uploadBufferSize;
+            if (!spec.name.empty()) {
+                frameCtx.readbackTexture->SetName(
+                    fmt::format(L"[Ymir-GCtx] Display output readback texture #{}", n).c_str());
+            }
+
+            // Transition hardware texture to COPY_DEST if using enhanced barriers
             if (auto *enhCmdList = GetCommandListForEnhancedBarriers(cmdListOps)) {
                 D3D12_TEXTURE_BARRIER barrier{
                     .SyncBefore = D3D12_BARRIER_SYNC_NONE,
@@ -423,6 +447,9 @@ struct Direct3D12GraphicsContext::Impl {
             // This is filled in when requested by the frontend
             frameCtx.graphicsFenceValue.store(0, std::memory_order_release);
         }
+
+        computeDisplayFrame = 0;
+        graphicsDisplayFrame = kInvalidFrameIndex;
 
         // Create root signature for texture drawing operations with:
         // [0] descriptor table with one SRV slot for the texture to draw
@@ -710,6 +737,7 @@ struct Direct3D12GraphicsContext::Impl {
         samplerHeap.Destroy();
         resourceHeapAlloc.Unbind();
         resourceHeap.Destroy();
+        rtvHeapAlloc.Unbind();
         rtvHeap.Destroy();
         swapchain.Destroy();
         device.Destroy();
@@ -1619,6 +1647,11 @@ struct Direct3D12GraphicsContext::Impl {
             }
         }
 
+        // Compute never rendered a frame
+        if (maxComputeFenceValue == 0) {
+            return displayFrames.size();
+        }
+
         return graphicsDisplayFrame;
     }
 
@@ -1632,11 +1665,71 @@ struct Direct3D12GraphicsContext::Impl {
             return kInvalidTextureID;
         }
         DisplayFrameContext &frameCtx = displayFrames[frameIndex];
-        frameCtx.graphicsFenceValue = GetCurrentFrameContext().fenceValue;
+        const UINT64 graphicsFenceValue = GetCurrentFrameContext().fenceValue;
+        const bool changed = frameCtx.graphicsFenceValue.load(std::memory_order_acquire) != graphicsFenceValue;
+        frameCtx.graphicsFenceValue = graphicsFenceValue;
 
         TextureInstance *texture = GetTexture(frameCtx.textureID);
         if (texture == nullptr) {
             return kInvalidTextureID; // Shouldn't happen
+        }
+
+        // Download texture to readback buffer if changed
+        if (changed) {
+            // Transition texture to copy source
+            if (auto *enhCmdList = GetCommandListForEnhancedBarriers(cmdListFrame)) {
+                D3D12_TEXTURE_BARRIER barrier{
+                    .SyncBefore = D3D12_BARRIER_SYNC_COPY,
+                    .SyncAfter = D3D12_BARRIER_SYNC_COPY,
+                    .AccessBefore = D3D12_BARRIER_ACCESS_COPY_DEST,
+                    .AccessAfter = D3D12_BARRIER_ACCESS_COPY_SOURCE,
+                    .LayoutBefore = D3D12_BARRIER_LAYOUT_COPY_DEST,
+                    .LayoutAfter = D3D12_BARRIER_LAYOUT_COPY_SOURCE,
+                    .pResource = texture->resource.GetPointer(),
+                    .Subresources =
+                        {
+                            .IndexOrFirstMipLevel = 0,
+                            .NumMipLevels = 0,
+                            .FirstArraySlice = 0,
+                            .NumArraySlices = 0,
+                            .FirstPlane = 0,
+                            .NumPlanes = 0,
+                        },
+                    .Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE,
+                };
+                const D3D12_BARRIER_GROUP group{
+                    .Type = D3D12_BARRIER_TYPE_TEXTURE,
+                    .NumBarriers = 1,
+                    .pTextureBarriers = &barrier,
+                };
+                enhCmdList->Barrier(1, &group);
+            } else {
+                D3D12_RESOURCE_BARRIER barrier{
+                    .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                    .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                    .Transition =
+                        {
+                            .pResource = texture->resource.GetPointer(),
+                            .Subresource = 0,
+                            .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                            .StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        },
+                };
+                cmdListFrame->ResourceBarrier(1, &barrier);
+            }
+
+            // Copy to readback texture
+            D3D12_TEXTURE_COPY_LOCATION srcLocation{
+                .pResource = texture->resource.GetPointer(),
+                .Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+                .SubresourceIndex = 0,
+            };
+            D3D12_TEXTURE_COPY_LOCATION dstLocation{
+                .pResource = frameCtx.readbackTexture.GetPointer(),
+                .Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+                .PlacedFootprint = texture->footprint,
+            };
+            cmdListFrame->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
         }
 
         // Transition texture to pixel shading
@@ -1644,9 +1737,9 @@ struct Direct3D12GraphicsContext::Impl {
             D3D12_TEXTURE_BARRIER barrier{
                 .SyncBefore = D3D12_BARRIER_SYNC_COPY,
                 .SyncAfter = D3D12_BARRIER_SYNC_PIXEL_SHADING,
-                .AccessBefore = D3D12_BARRIER_ACCESS_COPY_DEST,
+                .AccessBefore = changed ? D3D12_BARRIER_ACCESS_COPY_SOURCE : D3D12_BARRIER_ACCESS_COPY_DEST,
                 .AccessAfter = D3D12_BARRIER_ACCESS_COMMON,
-                .LayoutBefore = D3D12_BARRIER_LAYOUT_COPY_DEST,
+                .LayoutBefore = changed ? D3D12_BARRIER_LAYOUT_COPY_SOURCE : D3D12_BARRIER_LAYOUT_COPY_DEST,
                 .LayoutAfter = D3D12_BARRIER_LAYOUT_COMMON,
                 .pResource = texture->resource.GetPointer(),
                 .Subresources =
@@ -1674,7 +1767,7 @@ struct Direct3D12GraphicsContext::Impl {
                     {
                         .pResource = texture->resource.GetPointer(),
                         .Subresource = 0,
-                        .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                        .StateBefore = changed ? D3D12_RESOURCE_STATE_COPY_SOURCE : D3D12_RESOURCE_STATE_COPY_DEST,
                         .StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                     },
             };
@@ -1742,6 +1835,8 @@ struct Direct3D12GraphicsContext::Impl {
     }
 
     void ResetDisplayOutputTextures() {
+        WaitForGPU();
+
         for (DisplayFrameContext &frameCtx : displayFrames) {
             frameCtx.computeFence.store(nullptr, std::memory_order_release);
             frameCtx.computeFenceValue.store(0, std::memory_order_release);
