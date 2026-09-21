@@ -396,6 +396,7 @@ struct VDP2Regs {
         TVMD.u16 = value & 0x81F7;
         TVMDDirty |= ((TVMD.u16 ^ oldTVMD.u16) & 0x1F7) != 0;
         accessPatternsDirty |= TVMD.HRESOn != oldTVMD.HRESOn;
+        displayEnabledLatch &= TVMD.DISP;
         UpdateRestrictedColorCalc();
     }
 

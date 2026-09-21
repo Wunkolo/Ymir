@@ -3793,7 +3793,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2ComposeLine(uint32 y, const VDP2Regs 
 
     y = VDP2GetY<deinterlace>(y, regs2) ^ static_cast<uint32>(altField);
 
-    if (!regs2.displayEnabledLatch || !regs2.TVMD.DISP) {
+    if (!regs2.TVMD.DISP) {
         uint32 color = 0xFF000000;
         if (regs2.borderColorModeLatch) {
             color |= state2.lineBackLayerState.backColor.u32;
