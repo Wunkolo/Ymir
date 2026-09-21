@@ -4472,6 +4472,7 @@ struct Direct3D12VDPRenderer::Impl {
         int plottedSegmentsCount = 0;
         const int plottedSegmentsMax = quad.IsDegenerate() ? 2 : 1;
 
+        // TODO: cache this
         auto findEndCodeIndex = [&](uint32 v) -> uint32 {
             if (data.mode.endCodeDisable) {
                 return charSizeH;

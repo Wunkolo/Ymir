@@ -2596,19 +2596,20 @@ void SoftwareVDPRenderer::VDP2DrawLine(uint32 y, bool altField) {
 FORCE_INLINE void SoftwareVDPRenderer::VDP2DrawLineColorAndBackScreens(uint32 y, const VDP2Regs &regs2) {
     // Read line color screen color
     const LineBackScreenParams &lineParams = regs2.lineScreenParams;
-    if (lineParams.perLine || y == 0) {
-        const uint32 address = lineParams.baseAddress + y * sizeof(uint16);
-        const uint32 cramAddress = VDP2ReadRendererVRAM<uint16>(address) * sizeof(uint16);
-        m_state.state2.lineBackLayerState.lineColor = VDP2ReadRendererColor5to8(cramAddress);
+    uint32 lineAddress = lineParams.baseAddress;
+    if (lineParams.perLine) {
     }
+    const uint32 cramAddress = VDP2ReadRendererVRAM<uint16>(lineAddress) * sizeof(uint16);
+    m_state.state2.lineBackLayerState.lineColor = VDP2ReadRendererColor5to8(cramAddress);
 
     // Read back screen color
     const LineBackScreenParams &backParams = regs2.backScreenParams;
-    if (backParams.perLine || y == 0) {
-        const uint32 address = backParams.baseAddress + y * sizeof(Color555);
-        const Color555 color555{.u16 = VDP2ReadRendererVRAM<uint16>(address)};
-        m_state.state2.lineBackLayerState.backColor = ConvertRGB555to888(color555);
+    uint32 backAddress = backParams.baseAddress;
+    if (backParams.perLine) {
+        lineAddress += y * sizeof(uint16);
     }
+    const Color555 color555{.u16 = VDP2ReadRendererVRAM<uint16>(backAddress)};
+    m_state.state2.lineBackLayerState.backColor = ConvertRGB555to888(color555);
 }
 
 template <uint32 colorMode, bool rotate, bool altField, bool transparentMeshes>
