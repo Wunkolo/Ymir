@@ -85,6 +85,7 @@ Introduces save state file version 14.
 - VDP2: Fix off-screen coordinate latching. Fixes some Virtua Gun reload detection issues. (#787)
 - VDP2: Restrict color calculations in certain video modes. Fixes Sound Test screen text blending in with the background in Dark Savior.
     - In high resolution modes with color RAM modes other than 0, color calculations can only be applied on top of RGB layers, but not palette layers.
+- VDP2-SW: Fix out of bounds access when the display resolution is changed mid-frame while drawing an RBG.
 
 
 ## Version 0.3.3

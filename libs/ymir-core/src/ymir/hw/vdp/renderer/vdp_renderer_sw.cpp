@@ -2173,7 +2173,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2CalcRotationParameterTables(uint32 y,
         // Current coefficient address (16.10)
         uint32 KA = state.KA;
 
-        const bool doubleResH = regs2.TVMD.HRESOn & 0b010;
+        const bool doubleResH = m_HRes > kMaxNormalResH;
         const uint32 xShift = doubleResH ? 1 : 0;
         const uint32 maxX = m_HRes >> xShift;
 
@@ -4027,7 +4027,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2ComposeLine(uint32 y, const VDP2Regs 
     };
 
     if (AnyBool(std::span{layer0ColorCalcEnabled}.first(m_HRes))) {
-        const bool doubleResH = regs2.TVMD.HRESOn & 0b010;
+        const bool doubleResH = m_HRes > kMaxNormalResH;
         const uint32 xShift = doubleResH ? 1 : 0;
 
         // Gather color calculation data
@@ -4297,7 +4297,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2ComposeLine(uint32 y, const VDP2Regs 
                     case LYR_LineColor: overlayColor = state2.lineBackLayerState.lineColor; break;
                     case 8 /*RBG0 line color*/:
                     case 9 /*RBG1 line color*/: {
-                        const bool doubleResH = regs2.TVMD.HRESOn & 0b010;
+                        const bool doubleResH = m_HRes > kMaxNormalResH;
                         const uint32 xShift = doubleResH ? 1 : 0;
                         overlayColor = m_rbgLineColors[layerLevel - 8][x >> xShift];
                         break;
@@ -4597,7 +4597,7 @@ NO_INLINE void SoftwareVDPRenderer::VDP2DrawRotationScrollBG(const VDP2Regs &reg
 
     const VDP2State &state2 = m_state.state2;
 
-    const bool doubleResH = regs2.TVMD.HRESOn & 0b010;
+    const bool doubleResH = m_HRes > kMaxNormalResH;
     const uint32 xShift = doubleResH ? 1 : 0;
     const uint32 maxX = m_HRes >> xShift;
 
@@ -4708,7 +4708,7 @@ NO_INLINE void SoftwareVDPRenderer::VDP2DrawRotationBitmapBG(const VDP2Regs &reg
                                                              bool altField) {
     static constexpr bool selRotParam = bgIndex == 0;
 
-    const bool doubleResH = regs2.TVMD.HRESOn & 0b010;
+    const bool doubleResH = m_HRes > kMaxNormalResH;
     const uint32 xShift = doubleResH ? 1 : 0;
     const uint32 maxX = m_HRes >> xShift;
 
