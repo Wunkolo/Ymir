@@ -64,6 +64,9 @@ public:
     }
     void ReleaseCurrentDisplayOutputTexture() override {}
     void ResetDisplayOutputTextures() override {}
+    util::ValueResult<size_t> DownloadDisplayOutputTexture(void *buffer, size_t size) override {
+        return 0;
+    }
 
     util::VoidResult<> SetPresentMode(PresentMode mode) override {
         return {};

@@ -116,6 +116,12 @@ void Direct3D11GraphicsContext::ResetDisplayOutputTextures() {
     // TODO: clear display texture state
 }
 
+util::ValueResult<size_t> Direct3D11GraphicsContext::DownloadDisplayOutputTexture(void *buffer, size_t size) {
+    // TODO: if using hardware renderer, copy latest display output texture to buffer and return number of bytes copied.
+    // Return 0 if using software renderer.
+    return util::ErrorMessage{"Unimplemented"};
+}
+
 util::VoidResult<> Direct3D11GraphicsContext::SetPresentMode(PresentMode mode) {
     // TODO: set presentation mode
     return util::ErrorMessage{"Unimplemented"};

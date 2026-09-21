@@ -157,6 +157,12 @@ public:
     /// references.
     virtual void ResetDisplayOutputTextures() = 0;
 
+    /// @brief Downloads the latest display output texture.
+    /// @param[in] buffer the buffer to copy the frame into
+    /// @param[in] size the size of the buffer
+    /// @return the number of bytes copied on success, 0 when using a software renderer, or an error message on failure
+    virtual util::ValueResult<size_t> DownloadDisplayOutputTexture(void *buffer, size_t size) = 0;
+
     /// @brief Changes the frame presentation mode.
     /// @param[in] mode the new frame presentation mode
     /// @return nothing on success, an error message on failure

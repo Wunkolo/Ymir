@@ -1845,6 +1845,24 @@ struct Direct3D12GraphicsContext::Impl {
         computeDisplayFrame = 0;
         graphicsDisplayFrame = kInvalidFrameIndex;
     }
+
+    util::ValueResult<size_t> DownloadDisplayOutputTexture(void *buffer, size_t size) {
+        if (graphicsDisplayFrame == kInvalidFrameIndex) {
+            // No frames were copied; nothing to download.
+            // Either we're using the software renderer, or the hardware renderer never rendered a frame.
+            return 0;
+        }
+
+        const DisplayFrameContext &frameCtx = displayFrames[graphicsDisplayFrame];
+
+        // Wait until the latest frame for which we have a display is fully processed
+        fenceFrame.Wait(INFINITE, frameCtx.graphicsFenceValue);
+
+        // Copy buffer
+        const size_t copySize = std::min(size, frameCtx.readbackTextureSize);
+        memcpy(buffer, frameCtx.readbackTexturePtr, copySize);
+        return copySize;
+    }
 };
 
 // -----------------------------------------------------------------------------
@@ -2004,6 +2022,10 @@ void Direct3D12GraphicsContext::ReleaseCurrentDisplayOutputTexture() {
 
 void Direct3D12GraphicsContext::ResetDisplayOutputTextures() {
     m_impl->ResetDisplayOutputTextures();
+}
+
+util::ValueResult<size_t> Direct3D12GraphicsContext::DownloadDisplayOutputTexture(void *buffer, size_t size) {
+    return m_impl->DownloadDisplayOutputTexture(buffer, size);
 }
 
 util::VoidResult<> Direct3D12GraphicsContext::SetPresentMode(PresentMode mode) {

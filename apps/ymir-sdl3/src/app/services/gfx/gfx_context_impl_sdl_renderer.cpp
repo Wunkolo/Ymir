@@ -322,6 +322,11 @@ void SDLRendererGraphicsContext::ResetDisplayOutputTextures() {
     // Hardware-accelerated VDP rendering is not implemented for SDL Renderer
 }
 
+util::ValueResult<size_t> SDLRendererGraphicsContext::DownloadDisplayOutputTexture(void *buffer, size_t size) {
+    // Hardware-accelerated VDP rendering is not implemented for SDL Renderer
+    return 0;
+}
+
 util::VoidResult<> SDLRendererGraphicsContext::SetPresentMode(PresentMode mode) {
     if (SDL_SetRenderVSync(m_renderer, GetVSyncMode(mode))) {
         return {};

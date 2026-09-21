@@ -113,6 +113,12 @@ void VulkanGraphicsContext::ResetDisplayOutputTextures() {
     // TODO: clear display texture state
 }
 
+util::ValueResult<size_t> VulkanGraphicsContext::DownloadDisplayOutputTexture(void *buffer, size_t size) {
+    // TODO: if using hardware renderer, copy latest display output texture to buffer and return number of bytes copied.
+    // Return 0 if using software renderer.
+    return util::ErrorMessage{"Unimplemented"};
+}
+
 util::VoidResult<> VulkanGraphicsContext::SetPresentMode(PresentMode mode) {
     // TODO: set presentation mode
     return util::ErrorMessage{"Unimplemented"};

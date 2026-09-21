@@ -1049,6 +1049,12 @@ void MetalGraphicsContext::ResetDisplayOutputTextures() {
     // TODO: clear display texture state
 }
 
+util::ValueResult<size_t> MetalGraphicsContext::DownloadDisplayOutputTexture(void *buffer, size_t size) {
+    // TODO: if using hardware renderer, copy latest display output texture to buffer and return number of bytes copied.
+    // Return 0 if using software renderer.
+    return util::ErrorMessage{"Unimplemented"};
+}
+
 util::VoidResult<> MetalGraphicsContext::SetPresentMode(PresentMode mode) {
     m_impl->presentMode = mode;
     if (m_impl->metalLayer != nil) {

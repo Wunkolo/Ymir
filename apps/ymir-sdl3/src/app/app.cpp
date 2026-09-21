@@ -1941,8 +1941,36 @@ void App::RunEmulator() {
                 screenshot::Screenshot ss{};
                 ss.fbWidth = screen.width;
                 ss.fbHeight = screen.height;
-                ss.fb.resize(screen.width * screen.height);
-                std::copy_n(screen.framebuffers[1].begin(), ss.fb.size(), ss.fb.begin());
+                if (vdp.GetRenderer().IsHardwareRenderer()) {
+                    // Hardware renderers always copy the full resolution texture
+                    ss.fb.resize(vdp::kMaxResH * vdp::kMaxResV);
+                    const size_t framebufferSize = vdp::kMaxResH * vdp::kMaxResV * sizeof(uint32);
+                    gfx::IGraphicsContext &gfxCtx = m_graphicsService.GetGraphicsContext();
+                    auto result = gfxCtx.DownloadDisplayOutputTexture(ss.fb.data(), framebufferSize);
+                    if (result) {
+                        const size_t copySize = result.Value();
+                        if (copySize < framebufferSize) {
+                            devlog::warn<grp::base>(
+                                "Display framebuffer not fully downloaded. Expected {} bytes, got {} bytes",
+                                framebufferSize, copySize);
+                        }
+                    } else {
+                        m_context.DisplayMessage(
+                            fmt::format("Display framebuffer could not be downloaded: {}", result.Error().message));
+                    }
+
+                    // Shrink it down to size in-place
+                    for (uint32 y = 1; y < screen.height; ++y) {
+                        const size_t srcPos = y * vdp::kMaxResH;
+                        const size_t dstPos = y * screen.width;
+                        std::copy_n(&ss.fb[srcPos], screen.width, &ss.fb[dstPos]);
+                    }
+                    ss.fb.resize(screen.width * screen.height);
+                } else {
+                    // The software renderer already outputs the frame in a compact vector
+                    ss.fb.resize(screen.width * screen.height);
+                    std::copy_n(screen.framebuffers[1].begin(), ss.fb.size(), ss.fb.begin());
+                }
                 ss.fbScaleX = screen.scaleX;
                 ss.fbScaleY = screen.scaleY;
                 ss.ssScale = settings.general.screenshotScale;
