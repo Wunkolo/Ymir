@@ -157,7 +157,8 @@ public:
     /// references.
     virtual void ResetDisplayOutputTextures() = 0;
 
-    /// @brief Downloads the latest display output texture.
+    /// @brief Downloads the latest display output texture into the given buffer.
+    /// The texture is 704x512 with R8G8B8A8_UNORM pixels.
     /// @param[in] buffer the buffer to copy the frame into
     /// @param[in] size the size of the buffer
     /// @return the number of bytes copied on success, 0 when using a software renderer, or an error message on failure
