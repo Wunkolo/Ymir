@@ -411,8 +411,13 @@ uint3 Compose(uint2 basePos) {
             output = min(layer0Pixel + layer1Pixel, 255);
         } else {
             const bool useSecondScreenRatio = BitTest(g_commonParams.layerParams, 27);
-            const uint ratioLayer = useSecondScreenRatio ? layerStack[1] : layerStack[0];
-            const int ratio = GetColorCalcRatio(ratioLayer, pos);
+            int ratio;
+            if (useSecondScreenRatio && layer0LineColorEnabled) {
+                ratio = g_composeParams[0].backLineColorCalcRatios[1];
+            } else {
+                const uint ratioLayer = useSecondScreenRatio ? layerStack[1] : layerStack[0];
+                ratio = GetColorCalcRatio(ratioLayer, pos);
+            }
             output = int3(layer1Pixel) + (((int3(layer0Pixel) - int3(layer1Pixel)) * ratio) >> 5);
         }
     } else {
@@ -446,8 +451,13 @@ uint3 Compose(uint2 basePos) {
                 meshPixel = min(meshPixel + output, 255);
             } else {
                 const bool useSecondScreenRatio = BitTest(g_commonParams.layerParams, 27);
-                const uint ratioLayer = useSecondScreenRatio ? layerStack[1] : layerStack[0];
-                const int ratio = GetColorCalcRatio(ratioLayer, pos);
+                int ratio;
+                if (useSecondScreenRatio && layer0LineColorEnabled) {
+                    ratio = g_composeParams[0].backLineColorCalcRatios[1];
+                } else {
+                    const uint ratioLayer = useSecondScreenRatio ? layerStack[1] : layerStack[0];
+                    ratio = GetColorCalcRatio(ratioLayer, pos);
+                }
                 meshPixel = int3(output) + (((int3(meshPixel) - int3(output)) * ratio) >> 5);
             }
         }
