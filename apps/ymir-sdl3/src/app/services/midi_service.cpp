@@ -31,6 +31,8 @@ MIDIService::~MIDIService() = default;
 void MIDIService::Initialize(std::function<void()> onComplete) {
     devlog::info<grp::midi>("Initializing MIDI backend...");
 
+    // Initialize in a thread because it can take a *long* time to load on some systems...
+    // 20 minutes is not unheard of!
     std::thread initThread{[&, onComplete = onComplete] {
         std::vector<RtMidi::Api> apis{};
         std::unordered_set<RtMidi::Api> failedAPIs{};
