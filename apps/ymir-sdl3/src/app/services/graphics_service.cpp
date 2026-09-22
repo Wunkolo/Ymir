@@ -34,13 +34,13 @@ GraphicsService::~GraphicsService() {}
 void GraphicsService::RegisterHardwareRendererCallbacks(ymir::vdp::VDP &vdp) {
 #if YMIR_PLATFORM_HAS_DIRECT3D
     vdp.SetDirect3D12FrameCopyRequestCallback(
-        {this, [](ID3D12Fence *fence, uint64 fenceValue, void *ctx) -> ID3D12Resource * {
+        {this, [](ID3D12Fence *fence, uint64 fenceValue, uint32 width, uint32 height, void *ctx) -> ID3D12Resource * {
              auto &graphicsService = *static_cast<GraphicsService *>(ctx);
              auto *graphicsContext = graphicsService.GetGraphicsContext().As<Direct3D12GraphicsContext>();
              if (graphicsContext == nullptr) {
                  return nullptr;
              }
-             return graphicsContext->GetNextDisplayOutputTexture(fence, fenceValue);
+             return graphicsContext->GetNextDisplayOutputTexture(fence, fenceValue, width, height);
          }});
 #endif
 }

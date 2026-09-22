@@ -55,7 +55,7 @@ public:
     util::VoidResult<> DrawTextureRotated(TextureID id, const FRect &srcRect, const FRect &dstRect, double rotAngle,
                                           const FPoint2D *pivot = nullptr) override;
 
-    TextureID AcquireCurrentDisplayOutputTexture() override;
+    std::optional<DisplayTextureSpec> AcquireCurrentDisplayOutputTexture() override;
     void ReleaseCurrentDisplayOutputTexture() override;
     void ResetDisplayOutputTextures() override;
     util::ValueResult<size_t> DownloadDisplayOutputTexture(void *buffer, size_t size) override;
@@ -70,8 +70,10 @@ public:
     /// @brief Retrieves a pointer to the next free display output texture, or `nullptr` if no slots are available.
     /// @param[in] fence the compute fence to wait for
     /// @param[in] fenceValue the fence value to wait for
+    /// @param[in] width the display width
+    /// @param[in] height the display height
     /// @return a pointer to the next free display output frame, or `nullptr` if no frame is available
-    ID3D12Resource *GetNextDisplayOutputTexture(ID3D12Fence *fence, uint64 fenceValue);
+    ID3D12Resource *GetNextDisplayOutputTexture(ID3D12Fence *fence, uint64 fenceValue, uint32 width, uint32 height);
 
 private:
     std::unique_ptr<Impl> m_impl;

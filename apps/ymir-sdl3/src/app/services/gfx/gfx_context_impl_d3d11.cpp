@@ -101,10 +101,10 @@ util::VoidResult<> Direct3D11GraphicsContext::DrawTextureRotated(TextureID id, c
     return util::ErrorMessage{"Unimplemented"};
 }
 
-TextureID Direct3D11GraphicsContext::AcquireCurrentDisplayOutputTexture() {
+std::optional<DisplayTextureSpec> Direct3D11GraphicsContext::AcquireCurrentDisplayOutputTexture() {
     // TODO: find and update index of the latest complete display output texture, emit transition to copy destination
-    // barrier and return its texture ID
-    return TextureID();
+    // barrier and return its texture ID, width and height
+    return std::nullopt;
 }
 
 void Direct3D11GraphicsContext::ReleaseCurrentDisplayOutputTexture() {

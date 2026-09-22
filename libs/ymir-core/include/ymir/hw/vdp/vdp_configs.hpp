@@ -187,9 +187,6 @@ struct RendererCallbacks {
     /// @brief Invoked when the VDP1 swaps framebuffers.
     CBVDP1FramebufferSwap VDP1FramebufferSwap;
 
-    /// @brief Invoked when the VDP2 resolution is changed.
-    CBVDP2ResolutionChanged VDP2ResolutionChanged;
-
     /// @brief Invoked when the VDP2 finishes drawing a frame.
     CBVDP2DrawFinished VDP2DrawFinished;
 };

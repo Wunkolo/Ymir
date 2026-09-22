@@ -226,4 +226,16 @@ struct Texture2DSpec {
     std::string name;
 };
 
+/// @brief Specifications for a display texture.
+struct DisplayTextureSpec {
+    /// @brief The texture's identifier.
+    TextureID id;
+
+    /// @brief The width of the display contained in the texture.
+    uint32 width;
+
+    /// @brief The height of the display contained in the texture.
+    uint32 height;
+};
+
 } // namespace app::gfx

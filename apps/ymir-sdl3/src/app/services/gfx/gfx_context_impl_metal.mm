@@ -1034,10 +1034,10 @@ util::VoidResult<> MetalGraphicsContext::DrawTextureRotated(TextureID textureID,
     return m_impl->DrawTextureRotated(textureID, srcRect, dstRect, rotAngle, rotPivot);
 }
 
-TextureID MetalGraphicsContext::AcquireCurrentDisplayOutputTexture() {
+std::optional<DisplayTextureSpec> MetalGraphicsContext::AcquireCurrentDisplayOutputTexture() {
     // TODO: find and update index of the latest complete display output texture, emit transition to copy destination
-    // barrier and return its texture ID
-    return kInvalidTextureID;
+    // barrier and return its texture ID, width and height
+    return std::nullopt;
 }
 
 void MetalGraphicsContext::ReleaseCurrentDisplayOutputTexture() {

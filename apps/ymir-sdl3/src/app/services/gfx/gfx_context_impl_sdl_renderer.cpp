@@ -309,9 +309,9 @@ util::VoidResult<> SDLRendererGraphicsContext::DrawTextureRotated(TextureID id, 
     return util::ErrorMessage{fmt::format("Failed to draw rotated texture: {}", SDL_GetError())};
 }
 
-TextureID SDLRendererGraphicsContext::AcquireCurrentDisplayOutputTexture() {
+std::optional<DisplayTextureSpec> SDLRendererGraphicsContext::AcquireCurrentDisplayOutputTexture() {
     // Hardware-accelerated VDP rendering is not implemented for SDL Renderer
-    return kInvalidTextureID;
+    return std::nullopt;
 }
 
 void SDLRendererGraphicsContext::ReleaseCurrentDisplayOutputTexture() {

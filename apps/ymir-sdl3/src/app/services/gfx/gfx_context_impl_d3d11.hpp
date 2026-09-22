@@ -42,7 +42,7 @@ public:
     util::VoidResult<> DrawTextureRotated(TextureID id, const FRect &srcRect, const FRect &dstRect, double rotAngle,
                                           const FPoint2D *anchorPoint = nullptr) override;
 
-    TextureID AcquireCurrentDisplayOutputTexture() override;
+    std::optional<DisplayTextureSpec> AcquireCurrentDisplayOutputTexture() override;
     void ReleaseCurrentDisplayOutputTexture() override;
     void ResetDisplayOutputTextures() override;
     util::ValueResult<size_t> DownloadDisplayOutputTexture(void *buffer, size_t size) override;

@@ -204,6 +204,9 @@ struct Direct3D12GraphicsContext::Impl {
         void *readbackTexturePtr = nullptr;
         size_t readbackTextureSize = 0;
 
+        uint32 width;
+        uint32 height;
+
         std::atomic<ID3D12Fence *> computeFence; // Compute fence to be waited on
         std::atomic<UINT64> computeFenceValue;   // Value to wait for
         std::atomic<UINT64> graphicsFenceValue;  // Graphics fence value on which this frame is being used
@@ -1606,7 +1609,7 @@ struct Direct3D12GraphicsContext::Impl {
         return computeDisplayFrame;
     }
 
-    ID3D12Resource *GetNextDisplayOutputTexture(ID3D12Fence *fence, uint64 fenceValue) {
+    ID3D12Resource *GetNextDisplayOutputTexture(ID3D12Fence *fence, uint64 fenceValue, uint32 width, uint32 height) {
         const size_t nextIndex = GetDisplayFrameIndexForCompute();
         DisplayFrameContext &frameCtx = displayFrames[nextIndex];
 
@@ -1617,6 +1620,8 @@ struct Direct3D12GraphicsContext::Impl {
 
         frameCtx.computeFence.store(fence, std::memory_order_release);
         frameCtx.computeFenceValue.store(fenceValue, std::memory_order_release);
+        frameCtx.width = width;
+        frameCtx.height = height;
         return texture->resource.GetPointer();
     }
 
@@ -1655,14 +1660,14 @@ struct Direct3D12GraphicsContext::Impl {
         return graphicsDisplayFrame;
     }
 
-    TextureID AcquireCurrentDisplayOutputTexture() {
+    std::optional<DisplayTextureSpec> AcquireCurrentDisplayOutputTexture() {
         // TODO: return changed flag to allow frontend to redraw the frame only if needed
 
         // Get latest completed frame index
         const size_t frameIndex = GetDisplayFrameIndexForGraphics();
         if (frameIndex >= displayFrames.size()) {
             // No frames were rendered; bail out
-            return kInvalidTextureID;
+            return std::nullopt;
         }
         DisplayFrameContext &frameCtx = displayFrames[frameIndex];
         const UINT64 graphicsFenceValue = GetCurrentFrameContext().fenceValue;
@@ -1671,7 +1676,7 @@ struct Direct3D12GraphicsContext::Impl {
 
         TextureInstance *texture = GetTexture(frameCtx.textureID);
         if (texture == nullptr) {
-            return kInvalidTextureID; // Shouldn't happen
+            return std::nullopt; // Shouldn't happen
         }
 
         // Download texture to readback buffer if changed
@@ -1778,7 +1783,11 @@ struct Direct3D12GraphicsContext::Impl {
         assert(frameCtx.computeFence != nullptr);
         cmdQueue->Wait(frameCtx.computeFence, frameCtx.computeFenceValue);
 
-        return frameCtx.textureID;
+        return DisplayTextureSpec{
+            .id = frameCtx.textureID,
+            .width = frameCtx.width,
+            .height = frameCtx.height,
+        };
     }
 
     void ReleaseCurrentDisplayOutputTexture() {
@@ -2012,7 +2021,7 @@ util::VoidResult<> Direct3D12GraphicsContext::DrawTextureRotated(TextureID id, c
     return m_impl->DrawTextureRotated(id, srcRect, dstRect, rotAngle, rotPivot);
 }
 
-TextureID Direct3D12GraphicsContext::AcquireCurrentDisplayOutputTexture() {
+std::optional<DisplayTextureSpec> Direct3D12GraphicsContext::AcquireCurrentDisplayOutputTexture() {
     return m_impl->AcquireCurrentDisplayOutputTexture();
 }
 
@@ -2041,8 +2050,9 @@ ID3D12Device *Direct3D12GraphicsContext::GetDevice() const {
     return m_impl->device.GetPointer();
 }
 
-ID3D12Resource *Direct3D12GraphicsContext::GetNextDisplayOutputTexture(ID3D12Fence *fence, uint64 fenceValue) {
-    return m_impl->GetNextDisplayOutputTexture(fence, fenceValue);
+ID3D12Resource *Direct3D12GraphicsContext::GetNextDisplayOutputTexture(ID3D12Fence *fence, uint64 fenceValue,
+                                                                       uint32 width, uint32 height) {
+    return m_impl->GetNextDisplayOutputTexture(fence, fenceValue, width, height);
 }
 
 } // namespace app::gfx

@@ -59,8 +59,8 @@ public:
         return {};
     }
 
-    TextureID AcquireCurrentDisplayOutputTexture() override {
-        return kInvalidTextureID;
+    std::optional<DisplayTextureSpec> AcquireCurrentDisplayOutputTexture() override {
+        return std::nullopt;
     }
     void ReleaseCurrentDisplayOutputTexture() override {}
     void ResetDisplayOutputTextures() override {}

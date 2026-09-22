@@ -6044,7 +6044,7 @@ struct Direct3D12VDPRenderer::Impl {
         // Request a frame from the frontend
         // TODO: consider adding support for GPU waits
         ID3D12Resource *copyTarget =
-            hwCallbacks.FrameCopyRequest(computeFence.GetPointer(), frames.GetNextFenceValue());
+            hwCallbacks.FrameCopyRequest(computeFence.GetPointer(), frames.GetNextFenceValue(), HRes, VRes);
         if (copyTarget != nullptr) {
             // Transition composited output texture to copy source
             barrierTracker.TransitionTexture(vdp2.compositeOutTexture.GetPointer(), D3D12_RESOURCE_STATE_COPY_SOURCE,
@@ -6265,7 +6265,6 @@ void Direct3D12VDPRenderer::VDP2SetResolution(uint32 h, uint32 v, bool exclusive
     m_impl->HRes = h;
     m_impl->VRes = v;
     m_impl->exclusiveMonitor = exclusive;
-    Callbacks.VDP2ResolutionChanged(h, v);
 }
 
 void Direct3D12VDPRenderer::VDP2SetField(bool odd) {

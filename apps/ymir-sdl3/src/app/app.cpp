@@ -953,7 +953,6 @@ void App::RunEmulator() {
         }
 
         // Render scaled framebuffer into display texture
-        gfx::FRect srcRect{.x = 0.0f, .y = 0.0f, .w = (float)screen.width, .h = (float)screen.height};
         gfx::FRect dstRect{.x = 0.0f,
                            .y = 0.0f,
                            .w = (float)screen.width * screen.fbScale,
@@ -961,13 +960,17 @@ void App::RunEmulator() {
 
         if (videoSettings.useHardwareAcceleration) {
             gfx::IGraphicsContext &gfxCtx = m_graphicsService.GetGraphicsContext();
-            const gfx::TextureID hwFbTexture = gfxCtx.AcquireCurrentDisplayOutputTexture();
-            if (gfxCtx.IsTextureValid(hwFbTexture)) {
+            const std::optional<gfx::DisplayTextureSpec> hwFbTexture = gfxCtx.AcquireCurrentDisplayOutputTexture();
+            if (hwFbTexture) {
+                screen.SetResolution(hwFbTexture->width, hwFbTexture->height);
+
                 const gfx::TextureID dispTextureID = m_graphicsService.GetTextureID(dispTexture);
-                gfxCtx.RenderToTexture(hwFbTexture, dispTextureID, srcRect, dstRect);
+                gfx::FRect srcRect{.x = 0.0f, .y = 0.0f, .w = (float)screen.width, .h = (float)screen.height};
+                gfxCtx.RenderToTexture(hwFbTexture->id, dispTextureID, srcRect, dstRect);
                 gfxCtx.ReleaseCurrentDisplayOutputTexture();
             }
         } else {
+            gfx::FRect srcRect{.x = 0.0f, .y = 0.0f, .w = (float)screen.width, .h = (float)screen.height};
             m_graphicsService.RenderToTexture(swFbTexture, dispTexture, srcRect, dstRect);
         }
     };
@@ -1043,14 +1046,6 @@ void App::RunEmulator() {
             auto &sharedCtx = *static_cast<SharedContext *>(ctx);
             auto &screen = sharedCtx.screen;
             ++screen.VDP1Frames;
-        });
-
-        callbacks.VDP2ResolutionChanged.Bind(&m_context, [](uint32 width, uint32 height, void *ctx) {
-            auto &sharedCtx = *static_cast<SharedContext *>(ctx);
-            auto &screen = sharedCtx.screen;
-            if (width != screen.width || height != screen.height) {
-                screen.SetResolution(width, height);
-            }
         });
 
         callbacks.VDP2DrawFinished.Bind(&m_context, [](void *ctx) {

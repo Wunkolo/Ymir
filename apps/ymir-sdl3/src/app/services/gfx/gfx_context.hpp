@@ -7,6 +7,7 @@
 #include <imgui.h>
 
 #include <functional>
+#include <optional>
 
 namespace app::gfx {
 
@@ -145,8 +146,9 @@ public:
 
     /// @brief Acquires the most recent display frame drawn the hardware-accelerated VDP renderer.
     /// This may involve barrier transitions, locking the texture or other such mechanisms.
-    /// @return the texture ID of the latest display frame. Use the graphics context to check if the texture ID is valid
-    virtual TextureID AcquireCurrentDisplayOutputTexture() = 0;
+    /// @return the texture specifications of the latest display frame, or `std::nullopt` if there is no display texture
+    /// available
+    virtual std::optional<DisplayTextureSpec> AcquireCurrentDisplayOutputTexture() = 0;
 
     /// @brief Releases the most recent display frame drawn by the hardware-accelerated VDP renderer.
     /// Must be invoked after acquiring and using the frame.
