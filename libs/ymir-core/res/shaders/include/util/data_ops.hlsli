@@ -27,7 +27,7 @@ void WriteOr8(RWByteAddressBuffer buf, uint address, uint value) {
 }
 
 void WriteOr16(RWByteAddressBuffer buf, uint address, uint value) {
-    value &= 0xFFFF;
+    value = ByteSwap16(value); // also masks to 16 bits
     value <<= (address & 2) * 8;
     uint dummy;
     buf.InterlockedOr(address & ~3, value, dummy);
