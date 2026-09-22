@@ -4367,9 +4367,9 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2ComposeLine(uint32 y, const VDP2Regs 
                 case OverlayType::ColorCalc: //
                 {
                     const uint8 stackIndex = overlay.colorCalcStackIndex <= 1 ? overlay.colorCalcStackIndex : 0;
-                    overlayColor = isColorCalcEnabled(scanline_layers[x][stackIndex], x)
-                                       ? overlay.colorCalcEnableColor
-                                       : overlay.colorCalcDisableColor;
+                    const bool colorCalc =
+                        stackIndex == 0 ? layer0ColorCalcEnabled[x] : composeLineBuffers.layer1ColorCalcEnabled[x];
+                    overlayColor = colorCalc ? overlay.colorCalcEnableColor : overlay.colorCalcDisableColor;
                     break;
                 }
                 case OverlayType::ColorGradation: //
@@ -4378,8 +4378,9 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2ComposeLine(uint32 y, const VDP2Regs 
                     const LayerIndex stackLayer = scanline_layers[x][stackIndex];
                     if (stackLayer <= LYR_NBG3) {
                         const ColorGradScreen screen = kColorGradScreens[stackLayer];
-                        overlayColor = screen == colorCalcParams.colorGradScreen ? overlay.colorGradEnableColor
-                                                                                 : overlay.colorGradDisableColor;
+                        overlayColor = colorCalcParams.colorGradEnable && screen == colorCalcParams.colorGradScreen
+                                           ? overlay.colorGradEnableColor
+                                           : overlay.colorGradDisableColor;
                     }
                     break;
                 }
