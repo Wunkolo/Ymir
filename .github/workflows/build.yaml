@@ -523,7 +523,7 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
           -DBUILD_SHARED_LIBS=OFF
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch.isa_name }}
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          #-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           -DVCPKG_TARGET_TRIPLET=${{ matrix.arch.triplet_arch }}-osx
           -DYmir_AVX2=${{ matrix.arch.enable_avx2_option }}
           -DYmir_ENABLE_IPO=ON
