@@ -44,6 +44,7 @@ Introduces save state file version 14.
 ### Fixes
 
 - App: Don't persist window geometry in full screen mode.
+- App: Initialize MIDI subsystem asynchronously. Fixes some cases where the application takes a long time to start up.
 - App: Reset window geometry if it matches the bounds of a display.
 - Backup RAM: Fix crash when attempting to load a backup RAM cartridge with the default path.
 - Backup RAM: Remove strict language check when importing files. Fixes importing save files from Kronos's backup RAM cartridges. (#942)

@@ -211,6 +211,14 @@ int App::Run(const CommandLineOptions &options) {
 
 #ifdef _WIN32
     gfx::EnumerateDXGIGraphicsAdapters();
+    devlog::info<grp::base>("DXGI adapters:");
+    for (const gfx::DXGIGraphicsAdapter &adapter : gfx::GetDXGIGraphicsAdapters()) {
+        devlog::info<grp::base>("  [{}] {} (mem: {:.2f} GiB VRAM, {:.2f} GiB sys, {:.2f} GiB shared)",
+                                adapter.id.ToString(), util::WStringToString(adapter.description),
+                                adapter.memory.dedicatedVideo / 1024.0 / 1024.0 / 1024.0,
+                                adapter.memory.dedicatedSystem / 1024.0 / 1024.0 / 1024.0,
+                                adapter.memory.sharedSystem / 1024.0 / 1024.0 / 1024.0);
+    }
 #endif
 
     m_options = options;
@@ -257,7 +265,7 @@ int App::Run(const CommandLineOptions &options) {
         auto &audioSettings = settings.audio;
 
         audioSettings.midiInputPort.Observe([&](app::Settings::Audio::MidiPort value) {
-            auto *input = m_midiService.GetInput();
+            auto input = m_midiService.GetInput();
             input->closePort();
 
             switch (value.type) {
@@ -289,7 +297,7 @@ int App::Run(const CommandLineOptions &options) {
         });
 
         audioSettings.midiOutputPort.Observe([&](app::Settings::Audio::MidiPort value) {
-            auto *output = m_midiService.GetOutput();
+            auto output = m_midiService.GetOutput();
             output->closePort();
 
             switch (value.type) {
@@ -1181,13 +1189,11 @@ void App::RunEmulator() {
     // ---------------------------------
     // MIDI setup
 
-    {
-        auto *input = m_midiService.GetInput();
-        input->setCallback(OnMidiInputReceived, this);
-
-        const std::string api = input->getApiName(input->getCurrentApi());
-        devlog::info<grp::base>("Using MIDI backend: {}", api);
-    }
+    m_midiService.SetMidiInputCallback(OnMidiInputReceived, this);
+    m_midiService.Initialize([&] {
+        settings.audio.midiInputPort.Notify();
+        settings.audio.midiOutputPort.Notify();
+    });
 
     // ---------------------------------
     // File dialogs

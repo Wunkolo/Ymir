@@ -66,7 +66,7 @@ void AudioSettingsView::Display() {
 
     // INPUT PORTS
 
-    auto *midiInput = midiService.GetInput();
+    auto midiInput = midiService.GetInput();
     const std::string inputPortName = midiService.GetMidiInputPortName();
     const std::string inputLabel = fmt::format("Input port {}", midiInput->isPortOpen() ? "(open)" : "");
 
@@ -100,7 +100,7 @@ void AudioSettingsView::Display() {
 
     // OUTPUT PORTS
 
-    auto *midiOutput = midiService.GetOutput();
+    auto midiOutput = midiService.GetOutput();
     const std::string outputPortName = midiService.GetMidiOutputPortName();
     const std::string outputLabel = fmt::format("Output port {}", midiOutput->isPortOpen() ? "(open)" : "");
 
