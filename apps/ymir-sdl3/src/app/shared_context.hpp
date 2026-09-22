@@ -289,16 +289,19 @@ struct SharedContext {
             resolutionChanged = true;
         }
 
-        // Staging framebuffers -- emu renders to one, GUI copies to other
-        std::array<std::array<uint32, ymir::vdp::kMaxResH * ymir::vdp::kMaxResV>, 2> framebuffers;
+        // Display framebuffers -- emu renders to one, GUI displays the other
+        using Framebuffer = std::array<uint32, ymir::vdp::kMaxResH * ymir::vdp::kMaxResV>;
+        std::array<Framebuffer, 2> framebuffers;
+        size_t currBackFramebuffer = 0;
         std::mutex mtxFramebuffer;
         bool updated = false;
 
-        void CopyFramebufferToTexture(void *data, size_t pitch) {
+        void CopyFramebufferToTexture(void *data, size_t pitch) const {
             auto pixelData = static_cast<uint32 *>(data);
             SDL_Rect area{.x = 0, .y = 0, .w = (int)width, .h = (int)height};
+            const auto &fb = framebuffers[currBackFramebuffer ^ 1u];
             for (uint32 y = 0; y < height; y++) {
-                std::copy_n(&framebuffers[1][y * width], width, &pixelData[y * pitch / sizeof(uint32)]);
+                std::copy_n(&fb[y * width], width, &pixelData[y * pitch / sizeof(uint32)]);
             }
         }
 

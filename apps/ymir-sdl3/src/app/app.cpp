@@ -1100,7 +1100,7 @@ void App::RunEmulator() {
                 }
                 if (settings.video.reduceLatency || !screen.updated || screen.videoSync) {
                     std::unique_lock lock{screen.mtxFramebuffer};
-                    std::copy_n(fb, width * height, screen.framebuffers[0].data());
+                    std::copy_n(fb, width * height, screen.framebuffers[screen.currBackFramebuffer].data());
                     screen.updated = true;
                     if (screen.videoSync) {
                         screen.frameReadyEvent.Set();
@@ -1970,7 +1970,8 @@ void App::RunEmulator() {
                 } else {
                     // The software renderer already outputs the frame in a compact vector
                     ss.fb.resize(screen.width * screen.height);
-                    std::copy_n(screen.framebuffers[1].begin(), ss.fb.size(), ss.fb.begin());
+                    const auto &fb = screen.framebuffers[screen.currBackFramebuffer ^ 1u];
+                    std::copy_n(fb.begin(), ss.fb.size(), ss.fb.begin());
                 }
                 ss.fbScaleX = screen.scaleX;
                 ss.fbScaleY = screen.scaleY;
@@ -1997,10 +1998,10 @@ void App::RunEmulator() {
                 screen.frameReadyEvent.Reset();
                 screen.expectFrame = false;
             }
-            screen.updated = false;
             {
                 std::unique_lock lock{screen.mtxFramebuffer};
-                screen.framebuffers[1] = screen.framebuffers[0];
+                screen.updated = false;
+                screen.currBackFramebuffer ^= 1u;
             }
             const gfx::IRect area{.x = 0, .y = 0, .w = screen.width, .h = screen.height};
             m_graphicsService.UpdateTexture(
