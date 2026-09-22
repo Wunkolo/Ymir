@@ -591,3 +591,4 @@ jobs:
         with:
           name: ${{ steps.strings.outputs.ymir-artifact-name }}
           path: ${{ steps.strings.outputs.ymir-artifact-name }}.zip
+          retention-days: 15
