@@ -364,8 +364,8 @@ uint3 Compose(uint2 basePos) {
 
             // Set layer 1 output to the color gradation screen where the designated screen is the topmost two layers
             if (layerStack[0] == colorGradLayer || layerStack[1] == colorGradLayer) {
-                const uint3 input2 = GetLayerOutput(colorGradLayer, uint2(max(pos.x - 2, 0), pos.y)).rgb;
-                const uint3 input1 = GetLayerOutput(colorGradLayer, uint2(max(pos.x - 1, 0), pos.y)).rgb;
+                const uint3 input2 = GetLayerOutput(colorGradLayer, uint2(max(int(pos.x) - 2, 0), pos.y)).rgb;
+                const uint3 input1 = GetLayerOutput(colorGradLayer, uint2(max(int(pos.x) - 1, 0), pos.y)).rgb;
                 const uint3 input0 = GetLayerOutput(colorGradLayer, pos).rgb;
                 layerStack[1] = colorGradLayer;
                 layer1Pixel = (((input2 + input1) >> 1u) + input0) >> 1u;
