@@ -1,8 +1,10 @@
 #pragma once
 
-#include <SDL3/SDL_video.h>
 #include <app/settings.hpp>
 #include <app/shared_context.hpp>
+
+#include <SDL3/SDL_video.h>
+
 #include <imgui.h>
 
 namespace app::services {

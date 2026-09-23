@@ -5,9 +5,12 @@
 #include <app/services/rom_service.hpp>
 
 #include <SDL3/SDL.h>
-#include <chrono>
+
 #include <fmt/format.h>
+
 #include <imgui.h>
+
+#include <chrono>
 
 namespace app::services {
 

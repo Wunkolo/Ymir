@@ -14,11 +14,14 @@
 #include <ymir/ymir.hpp>
 
 #include <SDL3/SDL.h>
-#include <algorithm>
+
 #include <fmt/format.h>
 #include <fmt/std.h>
-#include <fstream>
+
 #include <imgui.h>
+
+#include <algorithm>
+#include <fstream>
 #include <mutex>
 
 namespace app::services {
