@@ -616,6 +616,7 @@ void App::RunEmulator() {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
     io.KeyRepeatDelay = 0.350f;
     io.KeyRepeatRate = 0.030f;
+    io.UserData = &m_imguiData;
 
     m_displayService.LoadFonts();
 
@@ -724,7 +725,7 @@ void App::RunEmulator() {
         // Compute initial window size if not loaded from persistent state
         if (initGeometry) {
             // This is equivalent to ImGui::GetFrameHeight() without requiring a window
-            const float menuBarHeight = (16.0f + style.FramePadding.y * 2.0f) * m_context.displayScale;
+            const float menuBarHeight = (16.0f + style.FramePadding.y * 2.0f) * m_imguiData.displayScale;
 
             const auto &videoSettings = settings.video;
             const bool forceAspectRatio = videoSettings.forceAspectRatio;
@@ -2151,7 +2152,7 @@ void App::RunEmulator() {
 
             const float mousePosY = io.MousePos.y;
             const float vpTopQuarter =
-                viewport->Pos.y + std::min(viewport->Size.y * 0.25f, 120.0f * m_context.displayScale);
+                viewport->Pos.y + std::min(viewport->Size.y * 0.25f, 120.0f * m_imguiData.displayScale);
 
             // Show menu bar if mouse is in the top quarter of the screen (minimum of 120 scaled pixels) and visible
             return mousePosY <= vpTopQuarter;
@@ -2185,7 +2186,7 @@ void App::RunEmulator() {
                                 }
                                 if (shorten) {
                                     if (ImGui::BeginItemTooltip()) {
-                                        ImGui::PushTextWrapPos(450.0f * m_context.displayScale);
+                                        ImGui::PushTextWrapPos(450.0f * m_imguiData.displayScale);
                                         ImGui::Text("%s", fullPathStr.c_str());
                                         ImGui::PopTextWrapPos();
                                         ImGui::EndTooltip();
@@ -2282,14 +2283,14 @@ void App::RunEmulator() {
                                 [&] {
                                     ImGui::TextUnformatted(
                                         "Are you sure you wish to clear all save states for this game?");
-                                    if (ImGui::Button(
-                                            "Yes", ImVec2(80 * m_context.displayScale, 0 * m_context.displayScale))) {
+                                    if (ImGui::Button("Yes", ImVec2(80 * m_imguiData.displayScale,
+                                                                    0 * m_imguiData.displayScale))) {
                                         m_saveStateService.ClearSaveStates();
                                         m_windowManagerService.CloseGenericModal();
                                     }
                                     ImGui::SameLine();
-                                    if (ImGui::Button(
-                                            "No", ImVec2(80 * m_context.displayScale, 0 * m_context.displayScale))) {
+                                    if (ImGui::Button("No", ImVec2(80 * m_imguiData.displayScale,
+                                                                   0 * m_imguiData.displayScale))) {
                                         m_windowManagerService.CloseGenericModal();
                                     }
                                 },
@@ -2898,7 +2899,7 @@ void App::RunEmulator() {
                 const float mousePosY = io.MousePos.y;
                 const float vpBottomQuarter =
                     viewport->Pos.y +
-                    std::min(viewport->Size.y * 0.75f, viewport->Size.y - 120.0f * m_context.displayScale);
+                    std::min(viewport->Size.y * 0.75f, viewport->Size.y - 120.0f * m_imguiData.displayScale);
                 if ((mouseMoved && mousePosY >= vpBottomQuarter) || m_context.rewinding || m_context.paused) {
                     m_rewindBarFadeTimeBase = now;
                 }
@@ -2925,12 +2926,12 @@ void App::RunEmulator() {
                 static constexpr float kBaseShadowOffset = 3.0f;
                 static constexpr float kBaseTextShadowOffset = 1.0f;
                 static constexpr sint64 kBlinkInterval = 700;
-                const float size = kBaseSize * m_context.displayScale;
-                const float fontSizeMedium = m_context.fontSizes.medium * m_context.displayScale;
-                const float padding = kBasePadding * m_context.displayScale;
-                const float shadowOffset = kBaseShadowOffset * m_context.displayScale;
-                const float textShadowOffset = kBaseTextShadowOffset * m_context.displayScale;
-                ImFont *font = m_context.fonts.sansSerif.regular;
+                const float size = kBaseSize * m_imguiData.displayScale;
+                const float fontSizeMedium = m_imguiData.fontSizes.medium * m_imguiData.displayScale;
+                const float padding = kBasePadding * m_imguiData.displayScale;
+                const float shadowOffset = kBaseShadowOffset * m_imguiData.displayScale;
+                const float textShadowOffset = kBaseTextShadowOffset * m_imguiData.displayScale;
+                ImFont *font = m_imguiData.fonts.sansSerif.regular;
                 ImGui::PushFont(font, kBaseSize);
                 const ImVec2 charSize = ImGui::CalcTextSize(ICON_MS_PLAY_ARROW);
                 ImGui::PopFont();
@@ -2978,7 +2979,7 @@ void App::RunEmulator() {
                                       slomo ? (rev ? ICON_MS_ARROW_BACK_2 : ICON_MS_PLAY_ARROW)
                                             : (rev ? ICON_MS_FAST_REWIND : ICON_MS_FAST_FORWARD));
 
-                        ImGui::PushFont(m_context.fonts.sansSerif.regular, m_context.fontSizes.medium);
+                        ImGui::PushFont(m_imguiData.fonts.sansSerif.regular, m_imguiData.fontSizes.medium);
                         const auto textSize = ImGui::CalcTextSize(speed.c_str());
                         ImGui::PopFont();
 
@@ -2988,10 +2989,10 @@ void App::RunEmulator() {
                                              br.y + textPadding.y);
                         const ImVec2 textPos(rectPos.x + textPadding.x, rectPos.y + textPadding.y);
 
-                        drawList->AddText(m_context.fonts.sansSerif.regular, fontSizeMedium,
+                        drawList->AddText(m_imguiData.fonts.sansSerif.regular, fontSizeMedium,
                                           ImVec2(textPos.x + textShadowOffset, textPos.y + textShadowOffset),
                                           ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.85f)), speed.c_str());
-                        drawList->AddText(m_context.fonts.sansSerif.regular, fontSizeMedium, textPos,
+                        drawList->AddText(m_imguiData.fonts.sansSerif.regular, fontSizeMedium, textPos,
                                           ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.00f)), speed.c_str());
                     } else if (rev) {
                         drawIndicator(tl, alpha, size, ICON_MS_ARROW_BACK_2);
@@ -3009,11 +3010,11 @@ void App::RunEmulator() {
                     static constexpr float kVolumeBarBaseWidth = 100.0f;
                     static constexpr float kVolumeBarBaseHeight = 15.0f;
                     static constexpr float kVolumeBarYFudge = 3.0f; // compensate for Material Symbols char height
-                    const float iconSize = kIconBaseSize * m_context.displayScale;
-                    const float iconPadding = kIconBasePadding * m_context.displayScale;
-                    const float volumeBarWidth = kVolumeBarBaseWidth * m_context.displayScale;
-                    const float volumeBarHeight = kVolumeBarBaseHeight * m_context.displayScale;
-                    const float volumeBarYFudge = kVolumeBarYFudge * m_context.displayScale;
+                    const float iconSize = kIconBaseSize * m_imguiData.displayScale;
+                    const float iconPadding = kIconBasePadding * m_imguiData.displayScale;
+                    const float volumeBarWidth = kVolumeBarBaseWidth * m_imguiData.displayScale;
+                    const float volumeBarHeight = kVolumeBarBaseHeight * m_imguiData.displayScale;
+                    const float volumeBarYFudge = kVolumeBarYFudge * m_imguiData.displayScale;
                     const float gain = m_context.audioSystem.GetGain();
                     const bool mute = m_context.audioSystem.IsMute();
                     const bool forceDisplay = mute || gain == 0.0f;
@@ -3066,7 +3067,7 @@ void App::RunEmulator() {
                             if (mute) {
                                 volumeText = fmt::format("(Mute) {}", volumeText);
                             }
-                            ImGui::PushFont(font, m_context.fontSizes.medium);
+                            ImGui::PushFont(font, m_imguiData.fontSizes.medium);
                             const ImVec2 volumeTextSize = ImGui::CalcTextSize(volumeText.c_str());
                             ImGui::PopFont();
                             const ImVec2 volumeTextPos{p1.x - iconPadding - volumeTextSize.x, p1.y - volumeTextSize.y};
@@ -3129,7 +3130,7 @@ void App::RunEmulator() {
 
                 const float textWrapWidth = viewport->WorkSize.x - padding.x * 4.0f;
 
-                ImGui::PushFont(m_context.fonts.sansSerif.regular, m_context.fontSizes.small);
+                ImGui::PushFont(m_imguiData.fonts.sansSerif.regular, m_imguiData.fontSizes.small);
                 const auto textSize = ImGui::CalcTextSize(fpsText.c_str(), nullptr, false, textWrapWidth);
                 ImGui::PopFont();
 
@@ -3142,8 +3143,9 @@ void App::RunEmulator() {
                     rectPos,
                     ImVec2(rectPos.x + textSize.x + padding.x * 2.0f, rectPos.y + textSize.y + padding.y * 2.0f),
                     ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.5f)));
-                drawList->AddText(m_context.fonts.sansSerif.regular, m_context.fontSizes.small * m_context.displayScale,
-                                  textPos, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f)), fpsText.c_str(), nullptr,
+                drawList->AddText(m_imguiData.fonts.sansSerif.regular,
+                                  m_imguiData.fontSizes.small * m_imguiData.displayScale, textPos,
+                                  ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f)), fpsText.c_str(), nullptr,
                                   textWrapWidth);
             }
 
@@ -3182,7 +3184,7 @@ void App::RunEmulator() {
 
                     const float textWrapWidth = viewport->WorkSize.x - padding.x * 4.0f - spacing.x * 2.0f;
 
-                    ImGui::PushFont(m_context.fonts.sansSerif.regular, m_context.fontSizes.large);
+                    ImGui::PushFont(m_imguiData.fonts.sansSerif.regular, m_imguiData.fontSizes.large);
                     const auto textSize = ImGui::CalcTextSize(message->message.c_str(), nullptr, false, textWrapWidth);
                     ImGui::PopFont();
                     const ImVec2 textPos(messageX + padding.x, messageY + padding.y);
@@ -3191,8 +3193,8 @@ void App::RunEmulator() {
                         ImVec2(messageX, messageY),
                         ImVec2(messageX + textSize.x + padding.x * 2.0f, messageY + textSize.y + padding.y * 2.0f),
                         ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, alpha * 0.5f)));
-                    drawList->AddText(m_context.fonts.sansSerif.regular,
-                                      m_context.fontSizes.large * m_context.displayScale, textPos,
+                    drawList->AddText(m_imguiData.fonts.sansSerif.regular,
+                                      m_imguiData.fontSizes.large * m_imguiData.displayScale, textPos,
                                       ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)), message->message.c_str(),
                                       nullptr, textWrapWidth);
 

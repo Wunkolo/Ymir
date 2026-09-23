@@ -2,6 +2,7 @@
 
 #include "cmdline_opts.hpp"
 
+#include "imgui_data.hpp"
 #include "settings.hpp"
 #include "shared_context.hpp"
 
@@ -36,6 +37,7 @@ public:
 private:
     CommandLineOptions m_options;
 
+    YmirImGuiData m_imguiData;
     SharedContext m_context;
     services::GraphicsService m_graphicsService;
     services::SaveStateService m_saveStateService;

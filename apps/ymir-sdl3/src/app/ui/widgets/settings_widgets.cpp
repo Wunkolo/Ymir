@@ -2,6 +2,7 @@
 
 #include "common_widgets.hpp"
 
+#include <app/imgui_data.hpp>
 #include <app/settings.hpp>
 
 #include <app/services/gfx/gfx_adapters.hpp>
@@ -45,12 +46,12 @@ namespace settings::system {
         widgets::ExplanationTooltip("Enables emulation of the SH-2 cache.\n"
                                     "A few games require this to work properly.\n"
                                     "Reduces emulation performance by about 10%.\n\n"
-                                    "Upon enabling this option, both SH-2 CPUs' caches will be flushed.",
-                                    ctx.displayScale);
+                                    "Upon enabling this option, both SH-2 CPUs' caches will be flushed.");
         if (forced) {
+            const YmirImGuiData *imguiData = GetYmirImGuiData();
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::TextColored(ctx.colors.notice, "Forced by the currently loaded game");
+            ImGui::TextColored(imguiData->colors.notice, "Forced by the currently loaded game");
         }
     }
 
@@ -69,8 +70,7 @@ namespace settings::system {
                                     "Adjusts the cycle rate of the SH-2 CPUs. Also affects SCU DSP and VDP1.\n"
                                     "\n"
                                     "Values over 100% can reduce slowdowns in CPU-intensive games.\n"
-                                    "Values below 100% can improve performance on slower host CPUs.",
-                                    ctx.displayScale);
+                                    "Values below 100% can improve performance on slower host CPUs.");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-(resetButtonWidth + itemSpacingWidth));
         if (settings.MakeDirty(ImGui::SliderInt(
@@ -100,8 +100,7 @@ namespace settings::video {
             "Changes are applied immediately. If the new graphics backend fails to initialize, this option "
             "automatically reverts to the last working backend option.\n"
             "\n"
-            "SDL Renderer is offered as a fallback option and will not support any advanced graphics features.",
-            ctx.displayScale);
+            "SDL Renderer is offered as a fallback option and will not support any advanced graphics features.");
         ImGui::SameLine();
         if (ImGui::BeginCombo("##graphics_backend", gfx::GraphicsBackendName(videoSettings.graphicsBackend),
                               ImGuiComboFlags_HeightLarge | ImGuiComboFlags_WidthFitPreview)) {
@@ -178,10 +177,9 @@ namespace settings::video {
                                     "Greatly improves performance and enables additional enhancements.\n"
                                     "\n"
                                     "NOTE: Support for hardware acceleration is currently EXPERIMENTAL. You may "
-                                    "encounter bugs, stability and performance issues.",
-                                    ctx.displayScale);
+                                    "encounter bugs, stability and performance issues.");
         if (isSDLRenderer) {
-            widgets::ExplanationTooltip("Not supported with SDL Renderer", ctx.displayScale);
+            widgets::ExplanationTooltip("Not supported with SDL Renderer");
             ImGui::EndDisabled();
         }
     }
@@ -218,8 +216,7 @@ namespace settings::video {
             }
             widgets::ExplanationTooltip("Runs the software VDP1 renderer in a dedicated thread.\n"
                                         "Slightly improves performance.\n"
-                                        "When disabled, VDP1 rendering is done on the emulator thread.",
-                                        ctx.displayScale);
+                                        "When disabled, VDP1 rendering is done on the emulator thread.");
 
             bool threadedVDP2 = settings.video.swRenderer.threadedVDP2;
             if (settings.MakeDirty(ImGui::Checkbox("Threaded VDP2 renderer", &threadedVDP2))) {
@@ -230,8 +227,7 @@ namespace settings::video {
                 "Greatly improves performance and seems to cause no issues to games.\n"
                 "When disabled, VDP2 rendering is done on the emulator thread.\n"
                 "\n"
-                "It is HIGHLY recommended to leave this option enabled as there are no known drawbacks.",
-                ctx.displayScale);
+                "It is HIGHLY recommended to leave this option enabled as there are no known drawbacks.");
 
             ImGui::Indent();
             {
@@ -250,8 +246,7 @@ namespace settings::video {
                     "Significantly improves performance of the enhancement on CPUs with enough spare cores.\n"
                     "Requires a quad-core CPU or better for best results.\n"
                     "\n"
-                    "It is HIGHLY recommended to leave this option enabled if your CPU meets the requirements.",
-                    ctx.displayScale);
+                    "It is HIGHLY recommended to leave this option enabled if your CPU meets the requirements.");
 
                 if (!threadedVDP2) {
                     ImGui::EndDisabled();
@@ -283,8 +278,7 @@ namespace settings::video {
                 "far:\n"
                 "- True Pinball displays the bottom half of the board interleaved with the top half at the top of the "
                 "screen\n"
-                "- Shienryuu and Pro-Pinball: The Web's graphics jitter",
-                ctx.displayScale);
+                "- Shienryuu and Pro-Pinball: The Web's graphics jitter");
         }
 
         void TransparentMeshes(SharedContext &ctx) {
@@ -295,8 +289,7 @@ namespace settings::video {
                 videoSettings.enhancements.transparentMeshes = transparentMeshes;
             }
             widgets::ExplanationTooltip(
-                "When enabled, meshes (checkerboard patterns) will be rendered as transparent polygons instead.",
-                ctx.displayScale);
+                "When enabled, meshes (checkerboard patterns) will be rendered as transparent polygons instead.");
         }
 
     } // namespace enhancements
@@ -322,8 +315,7 @@ namespace settings::audio {
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Interpolation:");
         widgets::ExplanationTooltip("- Nearest neighbor: Cheapest option with grittier sounds.\n"
-                                    "- Linear: Hardware accurate option with softer sounds. (default)",
-                                    ctx.displayScale);
+                                    "- Linear: Hardware accurate option with softer sounds. (default)");
         interpOption("Nearest neighbor", InterpMode::NearestNeighbor);
         interpOption("Linear", InterpMode::Linear);
     }
@@ -335,12 +327,13 @@ namespace settings::audio {
     }
 
     void StepGranularity(SharedContext &ctx) {
+        const YmirImGuiData *imguiData = GetYmirImGuiData();
         auto &settings = ctx.serviceLocator.GetRequired<Settings>();
         auto &audioSettings = settings.audio;
         int stepGranularity = audioSettings.stepGranularity;
 
         if (ImGui::BeginTable("scsp_step_granularity", 2, ImGuiTableFlags_SizingStretchProp)) {
-            ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 200.0f * ctx.displayScale);
+            ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 200.0f * imguiData->displayScale);
             ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
 
             ImGui::TableNextRow();
@@ -357,8 +350,7 @@ namespace settings::audio {
                     "Very few games require this setting to be tweaked. It is recommended to leave it at 0 in most "
                     "cases.\n"
                     "\n"
-                    "This option might be of interest to homebrew developers who need extra accuracy in some way.",
-                    ctx.displayScale);
+                    "This option might be of interest to homebrew developers who need extra accuracy in some way.");
             }
             if (ImGui::TableNextColumn()) {
                 ImGui::SetNextItemWidth(-1.0f);
@@ -377,8 +369,7 @@ namespace settings::audio {
                     "The different colored regions indicate which portions of the sample are emulated on each step "
                     "with the current granularity setting. Higher granularity results in tighter synchronization "
                     "between the SCSP and other components (more accuracy) but lower performance due to additional "
-                    "context switching.",
-                    ctx.displayScale);
+                    "context switching.");
             }
             if (ImGui::TableNextColumn()) {
                 static constexpr ImU32 kGraphBackgroundColor = 0xAA253840;
@@ -395,7 +386,7 @@ namespace settings::audio {
                 const float graphHeight = ImGui::GetFrameHeight();
                 const float sliceWidth = graphWidth / (1 << stepGranularity);
                 const float slotWidth = graphWidth / 32.0f;
-                const float sepThickness = 1.5f * ctx.displayScale;
+                const float sepThickness = 1.5f * imguiData->displayScale;
 
                 auto *drawList = ImGui::GetWindowDrawList();
 
@@ -428,8 +419,7 @@ namespace settings::audio {
         }
         widgets::ExplanationTooltip("Runs the SCSP and MC68EC000 in a dedicated thread.\n"
                                     "Improves performance at the cost of accuracy.\n"
-                                    "A few select games may break when this option is enabled.",
-                                    ctx.displayScale);
+                                    "A few select games may break when this option is enabled.");
     }
 
 } // namespace settings::audio
@@ -449,8 +439,7 @@ namespace settings::cdblock {
                                     "The default value is 2x, matching the real Saturn's CD drive speed.\n"
                                     "Higher speeds decrease load times but may reduce compatibility.\n"
                                     "\n"
-                                    "This option is unavailable when using low level CD block emulation.",
-                                    ctx.displayScale);
+                                    "This option is unavailable when using low level CD block emulation.");
 
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-1.0f);
@@ -486,11 +475,12 @@ namespace settings::cdblock {
                                     "Low level emulation is much more accurate, but also more demanding and requires a "
                                     "valid CD block ROM image.\n"
                                     "\n"
-                                    "Changing this option causes a hard reset.",
-                                    ctx.displayScale);
+                                    "Changing this option causes a hard reset.");
         if (!hasROMs) {
+            const YmirImGuiData *imguiData = GetYmirImGuiData();
             ImGui::EndDisabled();
-            ImGui::TextColored(ctx.colors.warn, "No CD Block ROMs found. Low level emulation cannot be enabled.");
+            ImGui::TextColored(imguiData->colors.warn,
+                               "No CD Block ROMs found. Low level emulation cannot be enabled.");
         }
     }
 

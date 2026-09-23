@@ -4,6 +4,8 @@
 
 #include <app/ui/widgets/settings_widgets.hpp>
 
+#include <app/imgui_data.hpp>
+
 #include <util/sdl_file_dialog.hpp>
 
 #include <misc/cpp/imgui_stdlib.h>
@@ -18,6 +20,7 @@ CDBlockSettingsView::CDBlockSettingsView(SharedContext &context)
     : SettingsViewBase(context) {}
 
 void CDBlockSettingsView::Display() {
+    const YmirImGuiData *imguiData = GetYmirImGuiData();
     const float paddingWidth = ImGui::GetStyle().FramePadding.x;
     const float itemSpacingWidth = ImGui::GetStyle().ItemSpacing.x;
     const float fileSelectorButtonWidth = ImGui::CalcTextSize("...").x + paddingWidth * 2;
@@ -26,7 +29,7 @@ void CDBlockSettingsView::Display() {
 
     // -----------------------------------------------------------------------------------------------------------------
 
-    ImGui::PushFont(m_context.fonts.sansSerif.bold, m_context.fontSizes.large);
+    ImGui::PushFont(imguiData->fonts.sansSerif.bold, imguiData->fontSizes.large);
     ImGui::SeparatorText("Accuracy");
     ImGui::PopFont();
 
@@ -62,9 +65,9 @@ void CDBlockSettingsView::Display() {
     if (ImGui::BeginTable("cdb_roms", 3,
                           ImGuiTableFlags_ScrollY | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti |
                               ImGuiTableFlags_SortTristate,
-                          ImVec2(0, 150 * m_context.displayScale))) {
+                          ImVec2(0, 150 * imguiData->displayScale))) {
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_DefaultSort, 0.0f);
-        ImGui::TableSetupColumn("Version", ImGuiTableColumnFlags_WidthFixed, 60 * m_context.displayScale);
+        ImGui::TableSetupColumn("Version", ImGuiTableColumnFlags_WidthFixed, 60 * imguiData->displayScale);
         ImGui::TableSetupColumn("##use", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort,
                                 useButtonWidth);
         ImGui::TableSetupScrollFreeze(0, 1);
@@ -204,7 +207,7 @@ void CDBlockSettingsView::Display() {
 
     // -----------------------------------------------------------------------------------------------------------------
 
-    ImGui::PushFont(m_context.fonts.sansSerif.bold, m_context.fontSizes.large);
+    ImGui::PushFont(imguiData->fonts.sansSerif.bold, imguiData->fontSizes.large);
     ImGui::SeparatorText("Tweaks");
     ImGui::PopFont();
 

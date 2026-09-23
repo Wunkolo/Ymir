@@ -1,5 +1,9 @@
 #include "audio_widgets.hpp"
 
+#include <app/imgui_data.hpp>
+
+#include <ymir/core/types.hpp>
+
 #include <imgui.h>
 
 namespace app::ui::widgets {
@@ -8,7 +12,9 @@ namespace app::ui::widgets {
 
 // TODO: custom colors and styles
 
-void Oscilloscope(SharedContext &ctx, std::span<const float> waveform, ImVec2 size) {
+void Oscilloscope(std::span<const float> waveform, ImVec2 size) {
+    const YmirImGuiData *imguiData = GetYmirImGuiData();
+
     if (size.x == 0.0f) {
         size.x = ImGui::GetContentRegionAvail().x;
     }
@@ -17,8 +23,8 @@ void Oscilloscope(SharedContext &ctx, std::span<const float> waveform, ImVec2 si
     }
 
     // TODO: move all style and colors to the SharedContext
-    const float centerLineThickness = 1.0f * ctx.displayScale;
-    const float waveThickness = 1.5f * ctx.displayScale;
+    const float centerLineThickness = 1.0f * imguiData->displayScale;
+    const float waveThickness = 1.5f * imguiData->displayScale;
 
     const auto pos = ImGui::GetCursorScreenPos();
 
@@ -53,7 +59,8 @@ void Oscilloscope(SharedContext &ctx, std::span<const float> waveform, ImVec2 si
     ImGui::Dummy(size);
 }
 
-void Oscilloscope(SharedContext &ctx, std::span<const StereoSample> waveform, ImVec2 size) {
+void Oscilloscope(std::span<const StereoSample> waveform, ImVec2 size) {
+    const YmirImGuiData *imguiData = GetYmirImGuiData();
     if (size.x == 0.0f) {
         size.x = ImGui::GetContentRegionAvail().x;
     }
@@ -62,8 +69,8 @@ void Oscilloscope(SharedContext &ctx, std::span<const StereoSample> waveform, Im
     }
 
     // TODO: move all style and colors to the SharedContext
-    const float centerLineThickness = 1.0f * ctx.displayScale;
-    const float waveThickness = 1.5f * ctx.displayScale;
+    const float centerLineThickness = 1.0f * imguiData->displayScale;
+    const float waveThickness = 1.5f * imguiData->displayScale;
 
     const auto pos = ImGui::GetCursorScreenPos();
 

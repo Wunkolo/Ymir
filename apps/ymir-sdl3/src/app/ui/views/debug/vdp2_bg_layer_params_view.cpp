@@ -4,17 +4,19 @@
 
 #include <ymir/hw/vdp/vdp.hpp>
 
+#include <app/imgui_data.hpp>
+
 #include <imgui.h>
 
 using namespace ymir;
 
 namespace app::ui {
 
-VDP2BGLayerParamsView::VDP2BGLayerParamsView(SharedContext &context, vdp::VDP &vdp)
-    : m_context(context)
-    , m_vdp(vdp) {}
+VDP2BGLayerParamsView::VDP2BGLayerParamsView(vdp::VDP &vdp)
+    : m_vdp(vdp) {}
 
 void VDP2BGLayerParamsView::Display() {
+    const YmirImGuiData *imguiData = GetYmirImGuiData();
     auto &probe = m_vdp.GetProbe();
     const auto &regs2 = probe.GetVDP2Regs();
     const auto &state2 = probe.GetVDP2State();
@@ -29,12 +31,12 @@ void VDP2BGLayerParamsView::Display() {
 
     if (ImGui::BeginTable("layers", 7, ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableSetupColumn("");
-        ImGui::TableSetupColumn("NBG0", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
-        ImGui::TableSetupColumn("NBG1", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
-        ImGui::TableSetupColumn("NBG2", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
-        ImGui::TableSetupColumn("NBG3", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
-        ImGui::TableSetupColumn("RBG0", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
-        ImGui::TableSetupColumn("RBG1", ImGuiTableColumnFlags_WidthFixed, 70.0f * m_context.displayScale);
+        ImGui::TableSetupColumn("NBG0", ImGuiTableColumnFlags_WidthFixed, 70.0f * imguiData->displayScale);
+        ImGui::TableSetupColumn("NBG1", ImGuiTableColumnFlags_WidthFixed, 70.0f * imguiData->displayScale);
+        ImGui::TableSetupColumn("NBG2", ImGuiTableColumnFlags_WidthFixed, 70.0f * imguiData->displayScale);
+        ImGui::TableSetupColumn("NBG3", ImGuiTableColumnFlags_WidthFixed, 70.0f * imguiData->displayScale);
+        ImGui::TableSetupColumn("RBG0", ImGuiTableColumnFlags_WidthFixed, 70.0f * imguiData->displayScale);
+        ImGui::TableSetupColumn("RBG1", ImGuiTableColumnFlags_WidthFixed, 70.0f * imguiData->displayScale);
         ImGui::TableHeadersRow();
 
         // -------------------------------------------------------------------------------------------------------------

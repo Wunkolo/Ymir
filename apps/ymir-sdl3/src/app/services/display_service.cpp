@@ -1,8 +1,10 @@
 #include "display_service.hpp"
 
+#include <app/imgui_data.hpp>
 #include <app/profile.hpp>
 #include <app/settings.hpp>
 #include <app/shared_context.hpp>
+
 #include <app/ui/fonts/IconsMaterialSymbols.h>
 
 #include <ymir/util/dev_log.hpp>
@@ -56,9 +58,10 @@ void DisplayService::RescaleUI() {
     }
     devlog::info<grp::base>("Window DPI scaling: {:.1f}%", displayScale * 100.0f);
 
-    m_context.displayScale = displayScale;
-    devlog::info<grp::base>("UI scaling set to {:.1f}%", m_context.displayScale * 100.0f);
-    ReloadStyle(m_context.displayScale);
+    YmirImGuiData *imguiData = GetYmirImGuiData();
+    imguiData->displayScale = displayScale;
+    devlog::info<grp::base>("UI scaling set to {:.1f}%", imguiData->displayScale * 100.0f);
+    ReloadStyle(imguiData->displayScale);
 }
 
 void DisplayService::ReloadStyle(float displayScale) {
@@ -179,6 +182,7 @@ void DisplayService::ReloadStyle(float displayScale) {
 }
 
 void DisplayService::LoadFonts() {
+    YmirImGuiData *imguiData = GetYmirImGuiData();
     ImGuiIO &io = ImGui::GetIO();
     ImGuiStyle &style = ImGui::GetStyle();
 
@@ -227,19 +231,19 @@ void DisplayService::LoadFonts() {
         return font;
     };
 
-    m_context.fonts.sansSerif.regular = loadFont("SplineSans Medium", "fonts/SplineSans-Medium.ttf", true);
-    m_context.fonts.sansSerif.regular = mergeFont("fonts/MPLUSU-Ymir-Bold.ttf");
-    m_context.fonts.sansSerif.bold = loadFont("SplineSans Bold", "fonts/SplineSans-Bold.ttf", true);
-    m_context.fonts.sansSerif.bold = mergeFont("fonts/MPLUSU-Ymir-ExtraBold.ttf");
+    imguiData->fonts.sansSerif.regular = loadFont("SplineSans Medium", "fonts/SplineSans-Medium.ttf", true);
+    imguiData->fonts.sansSerif.regular = mergeFont("fonts/MPLUSU-Ymir-Bold.ttf");
+    imguiData->fonts.sansSerif.bold = loadFont("SplineSans Bold", "fonts/SplineSans-Bold.ttf", true);
+    imguiData->fonts.sansSerif.bold = mergeFont("fonts/MPLUSU-Ymir-ExtraBold.ttf");
 
-    m_context.fonts.monospace.regular = loadFont("SplineSansMono Medium", "fonts/SplineSansMono-Medium.ttf", false);
-    m_context.fonts.monospace.regular = mergeFont("fonts/MPLUSU-Ymir-Bold.ttf");
-    m_context.fonts.monospace.bold = loadFont("SplineSansMono Bold", "fonts/SplineSansMono-Bold.ttf", false);
-    m_context.fonts.monospace.bold = mergeFont("fonts/MPLUSU-Ymir-ExtraBold.ttf");
+    imguiData->fonts.monospace.regular = loadFont("SplineSansMono Medium", "fonts/SplineSansMono-Medium.ttf", false);
+    imguiData->fonts.monospace.regular = mergeFont("fonts/MPLUSU-Ymir-Bold.ttf");
+    imguiData->fonts.monospace.bold = loadFont("SplineSansMono Bold", "fonts/SplineSansMono-Bold.ttf", false);
+    imguiData->fonts.monospace.bold = mergeFont("fonts/MPLUSU-Ymir-ExtraBold.ttf");
 
-    m_context.fonts.display = loadFont("ZenDots Regular", "fonts/ZenDots-Regular.ttf", false);
+    imguiData->fonts.display = loadFont("ZenDots Regular", "fonts/ZenDots-Regular.ttf", false);
 
-    io.FontDefault = m_context.fonts.sansSerif.regular;
+    io.FontDefault = imguiData->fonts.sansSerif.regular;
 }
 
 void DisplayService::OnDisplayAdded(SDL_DisplayID id) {

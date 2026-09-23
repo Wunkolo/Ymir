@@ -916,8 +916,6 @@ void InputService::DrawInputs(ImDrawList *drawList) {
 
                 .strokeColor = {xhair.strokeColor[0], xhair.strokeColor[1], xhair.strokeColor[2], xhair.strokeColor[3]},
                 .strokeThickness = xhair.strokeThickness,
-
-                .displayScale = m_context.displayScale,
             };
             ui::widgets::Crosshair(drawList, params, {input.posX, input.posY});
         }
