@@ -45,6 +45,10 @@ public:
 
     Direct3D12RendererCallbacks HwCallbacks;
 
+protected:
+    void UpdateEnhancements() override;
+
+public:
     // -------------------------------------------------------------------------
     // Basics
 

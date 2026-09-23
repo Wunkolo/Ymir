@@ -792,6 +792,15 @@ struct Direct3D12VDPRenderer::Impl {
     DescriptorHeapAllocator resourceHeapAlloc;
 
     // =================================================================================================================
+    // Common rendering parameters
+
+    struct EnhancementsParams {
+        HLSLuint deinterlace : 1;          //     0  Deinterlace
+        HLSLuint transparentMeshes : 1;    //     1  Render mesh sprites as transparent
+    };
+    static_assert(sizeof(EnhancementsParams) == sizeof(HLSLuint));
+
+    // =================================================================================================================
     // VDP1 rendering
     //
     // The VDP1 rendering pipeline is submitted once per framebuffer swap.
@@ -819,11 +828,7 @@ struct Direct3D12VDPRenderer::Impl {
         } displayParams;
         static_assert(sizeof(DisplayParams) == sizeof(HLSLuint));
 
-        struct Enhancements {               //  bits  use
-            HLSLuint deinterlace : 1;       //     0  Deinterlace
-            HLSLuint transparentMeshes : 1; //     1  Render mesh sprites as transparent
-        } enhancements;
-        static_assert(sizeof(Enhancements) == sizeof(HLSLuint));
+        EnhancementsParams enhancements;
     };
 
     /// @brief VDP1 erase parameters, appended to common rendering parameters in the erase shader.
@@ -1376,11 +1381,7 @@ struct Direct3D12VDPRenderer::Impl {
         } windows;
         static_assert(sizeof(Windows) == sizeof(HLSLuint));
 
-        struct Enhancements {               //  bits  use
-            HLSLuint deinterlace : 1;       //     0  Deinterlace
-            HLSLuint transparentMeshes : 1; //     1  Render mesh sprites as transparent
-        } enhancements;
-        static_assert(sizeof(Enhancements) == sizeof(HLSLuint));
+        EnhancementsParams enhancements;
     };
 
     /// @brief Global VDP2 window parameters.
@@ -3762,6 +3763,14 @@ struct Direct3D12VDPRenderer::Impl {
         return {};
     }
 
+    void UpdateEnhancements() {
+        VDP1CommonRenderParams &params1 = vdp1.cpuCommonRenderParams;
+        params1.enhancements.deinterlace = enhancements.deinterlace;
+        params1.enhancements.transparentMeshes = enhancements.transparentMeshes;
+
+        vdp2.cpuCommonRenderParams.enhancements = params1.enhancements;
+    }
+
     // -----------------------------------------------------------------------------------------------------------------
     // VDP1 rendering
 
@@ -4283,9 +4292,6 @@ struct Direct3D12VDPRenderer::Impl {
         displayParams.dblInterlaceDrawLine = regs1.dblInterlaceDrawLine;
         displayParams.evenOddCoordSelect = regs1.evenOddCoordSelect;
         displayParams.drawFB = vdpState.fbIndex.draw;
-
-        params.enhancements.deinterlace = enhancements.deinterlace;
-        params.enhancements.transparentMeshes = enhancements.transparentMeshes;
     }
 
     void VDP1SelectPolyDrawShader(VDP1Command::DrawMode mode) {
@@ -5406,9 +5412,6 @@ struct Direct3D12VDPRenderer::Impl {
         params.windows.colorCalcSWEnable = regs2.colorCalcParams.windowSet.enabled[2];
         params.windows.colorCalcSWInvert = regs2.colorCalcParams.windowSet.inverted[2];
 
-        params.enhancements.deinterlace = enhancements.deinterlace;
-        params.enhancements.transparentMeshes = enhancements.transparentMeshes;
-
         // NOTE: this is uploaded as 32-bit root constants, not through the upload buffer.
         // No uploads or barriers are needed here.
     }
@@ -6125,6 +6128,13 @@ Direct3D12VDPRenderer::Create(VDPState &state, const config::VDP2DebugRender &vd
         return result.Error();
     }
     return renderer;
+}
+
+// -----------------------------------------------------------------------------
+// Configuration
+
+void Direct3D12VDPRenderer::UpdateEnhancements() {
+    m_impl->UpdateEnhancements();
 }
 
 // -----------------------------------------------------------------------------
