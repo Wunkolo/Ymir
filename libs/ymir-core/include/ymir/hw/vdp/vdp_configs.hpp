@@ -28,7 +28,6 @@ struct Enhancements {
     /// @brief Determines if any enhancement is enabled:
     /// - `deinterlace` is set to `true`
     /// - `transparentMeshes` is set to `true`
-    /// resolution scale factor is greater than 1.0x
     /// @return `true` if any enhancement is active, `false` otherwise
     bool AnyEnabled() const {
         return deinterlace || transparentMeshes;
