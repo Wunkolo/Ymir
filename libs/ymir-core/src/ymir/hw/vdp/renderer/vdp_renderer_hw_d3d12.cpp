@@ -968,8 +968,9 @@ struct Direct3D12VDPRenderer::Impl {
         FORCE_INLINE void MarkRange(uint32 address, uint32 size) {
             uint32 first = address >> blockSizeBits;
             uint32 last = (address + size - 1) >> blockSizeBits;
-            for (uint32 b = first; b <= last; ++b)
-                m_usage[b] = m_currGen;
+            for (uint32 i = first; i <= last; ++i) {
+                m_usage[i] = m_currGen;
+            }
         }
 
         /// @brief Checks if a particular address is marked as in use.
