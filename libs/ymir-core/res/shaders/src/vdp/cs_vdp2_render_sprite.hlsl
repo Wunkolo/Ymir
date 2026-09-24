@@ -202,8 +202,8 @@ uint2 CalcRotationSpriteCoordinates(uint2 pos) {
     // 10 + 0*10 + 0*10 = 10 + 10 + 10 = 10 frac bits
     // 23 + 10*13 + 9*13 = 23 + 23 + 22 = 23 total bits
     return uint2(
-        Xst + pos.y * deltaXst + pos.x * deltaX,
-        Yst + pos.y * deltaYst + pos.x * deltaY
+        (Xst + pos.y * deltaXst + pos.x * deltaX) >> 10,
+        (Yst + pos.y * deltaYst + pos.x * deltaY) >> 10
     );
 }
 
