@@ -33,12 +33,15 @@ static const bool dblInterlaceDrawLine = BitTest(g_commonParams.displayParams, 1
 static const bool rotate = BitTest(g_commonParams.spriteParams, 0);
 static const bool pixel8Bits = BitTest(g_commonParams.spriteParams, 1);
 static const uint type = BitExtract(g_commonParams.spriteParams, 2, 4);
-static const uint fbSizeH = 512u << BitExtract(g_commonParams.spriteParams, 6, 1);
-static const bool inHalfResH = BitTest(g_commonParams.spriteParams, 7);
-static const bool outHalfResH = BitTest(g_commonParams.spriteParams, 8);
-static const bool mixedFormat = BitTest(g_commonParams.spriteParams, 9);
-static const bool useSpriteWindow = BitTest(g_commonParams.spriteParams, 19);
-static const uint spriteDisplayFB = BitExtract(g_commonParams.spriteParams, 22, 1);
+static const uint2 fbSize = uint2(
+    512u << BitExtract(g_commonParams.spriteParams, 6, 1),
+    256u << BitExtract(g_commonParams.spriteParams, 7, 1)
+);
+static const bool inHalfResH = BitTest(g_commonParams.spriteParams, 8);
+static const bool outHalfResH = BitTest(g_commonParams.spriteParams, 9);
+static const bool mixedFormat = BitTest(g_commonParams.spriteParams, 10);
+static const bool useSpriteWindow = BitTest(g_commonParams.spriteParams, 20);
+static const uint spriteDisplayFB = BitExtract(g_commonParams.spriteParams, 23, 1);
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
 
@@ -405,6 +408,9 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
     uint field = 0;
     if (rotate) {
         spritePos = CalcRotationSpriteCoordinates(pos);
+        if (any(spritePos >= fbSize)) {
+            return output;
+        }
     } else {
         spritePos = pos;
         if (inHalfResH) {
@@ -419,7 +425,7 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
             spritePos.y >>= 1;
         }
     }
-    const uint fbAddr = spritePos.x + spritePos.y * fbSizeH;
+    const uint fbAddr = spritePos.x + spritePos.y * fbSize.x;
 
     if (InsideWindows(pos)) {
         return output;
@@ -458,15 +464,15 @@ SpriteOutput DrawSprite(uint2 pos, uint2 outPos, uint index) {
     const SpriteData spriteData = FetchSpriteData(fbAddr, field, meshLayer);
 
     // Handle sprite window
-    const bool spriteWindowEnabled = BitTest(g_commonParams.spriteParams, 20);
-    const bool spriteWindowInverted = BitTest(g_commonParams.spriteParams, 21);
+    const bool spriteWindowEnabled = BitTest(g_commonParams.spriteParams, 21);
+    const bool spriteWindowInverted = BitTest(g_commonParams.spriteParams, 22);
     if (useSpriteWindow && spriteWindowEnabled && spriteData.shadowOrWindow != spriteWindowInverted) {
         output.layer = kTransparentPixel;
         output.shadowOrWindow = true;
         return output;
     }
 
-    const uint colorDataOffset = BitExtract(g_commonParams.spriteParams, 16, 3) << 8;
+    const uint colorDataOffset = BitExtract(g_commonParams.spriteParams, 17, 3) << 8;
     const uint colorIndex = colorDataOffset + spriteData.colorData;
     const uint4 outColor = FetchCRAMColor(0, colorIndex);
     const bool outTransparent = spriteData.special == kSpriteDataTransparent;

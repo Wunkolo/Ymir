@@ -1390,19 +1390,20 @@ struct Direct3D12VDPRenderer::Impl {
                                           //          1 = 8-bit
             HLSLuint type : 4;            //   2-5  Sprite data type
             HLSLuint fbSizeH : 1;         //     6  VDP1 framebuffer horizontal size shift  (512 << x)
-            HLSLuint inHalfResH : 1;      //     7  Sprite input at half resolution
-            HLSLuint outHalfResH : 1;     //     8  Sprite output at half resolution
-            HLSLuint mixedFormat : 1;     //     9  Sprite layer color format
+            HLSLuint fbSizeV : 1;         //     7  VDP1 framebuffer vertical size shift    (256 << x)
+            HLSLuint inHalfResH : 1;      //     8  Sprite input at half resolution
+            HLSLuint outHalfResH : 1;     //     9  Sprite output at half resolution
+            HLSLuint mixedFormat : 1;     //    10  Sprite layer color format
                                           //          0 = palette only
                                           //          1 = mixed palette/RGB
-            HLSLuint colorCalcEnable : 1; //    10  Sprite color calculation enable
-            HLSLuint colorCalcValue : 3;  // 11-13  Sprite target color calculation value
-            HLSLuint colorCalcCond : 2;   // 14-15  Special color calculation condition
-            HLSLuint colorDataOffset : 3; // 16-18  Special color data offset in CRAM
-            HLSLuint useSpriteWindow : 1; //    19  Use sprite window
-            HLSLuint windowEnabled : 1;   //    20  Sprite window enabled for the sprite layer
-            HLSLuint windowInverted : 1;  //    21  Sprite window inverted for the sprite layer
-            HLSLuint displayFB : 1;       //    22  Current sprite display framebuffer index
+            HLSLuint colorCalcEnable : 1; //    11  Sprite color calculation enable
+            HLSLuint colorCalcValue : 3;  // 12-14  Sprite target color calculation value
+            HLSLuint colorCalcCond : 2;   // 15-16  Special color calculation condition
+            HLSLuint colorDataOffset : 3; // 17-19  Special color data offset in CRAM
+            HLSLuint useSpriteWindow : 1; //    20  Use sprite window
+            HLSLuint windowEnabled : 1;   //    21  Sprite window enabled for the sprite layer
+            HLSLuint windowInverted : 1;  //    22  Sprite window inverted for the sprite layer
+            HLSLuint displayFB : 1;       //    23  Current sprite display framebuffer index
         } spriteParams;
         static_assert(sizeof(SpriteParams) == sizeof(HLSLuint));
 
@@ -5486,6 +5487,7 @@ struct Direct3D12VDPRenderer::Impl {
         params.spriteParams.pixel8Bits = regs1.pixel8Bits;
         params.spriteParams.type = regs2.spriteParams.type;
         params.spriteParams.fbSizeH = std::countr_zero(regs1.fbSizeH) - 9;
+        params.spriteParams.fbSizeV = std::countr_zero(regs1.fbSizeV) - 8;
         params.spriteParams.inHalfResH = false;
         params.spriteParams.outHalfResH = false;
         if (!regs1.hdtvEnable && !regs1.fbRotEnable) {
