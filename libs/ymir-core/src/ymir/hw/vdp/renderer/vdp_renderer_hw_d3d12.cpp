@@ -946,14 +946,15 @@ struct Direct3D12VDPRenderer::Impl {
     static_assert(kMaxVDP1OITFragmentsPerDispatch <= 65535 * 64);
 
     /// @brief Tracks memory usage with a generation map.
-    /// @tparam blockSizeBits determines the size of the block as a power of two
-    template <size_t vramSize, unsigned blockSizeBits = 5>
+    /// @tparam memorySize total size of the memory area to track
+    /// @tparam blockSizeBits splits the memory into blocks with 2^blockSizeBits bytes
+    template <size_t memorySize, unsigned blockSizeBits = 5>
     class MemoryUsageTracker {
         static constexpr uint32 kBlockSize = 1u << blockSizeBits;
-        static constexpr uint32 kArraySize = vramSize >> blockSizeBits;
+        static constexpr uint32 kArraySize = memorySize >> blockSizeBits;
 
     public:
-        /// @brief Clears usage across the whole VRAM.
+        /// @brief Clears usage across the whole memory.
         FORCE_INLINE void Clear() {
             // Clear the whole map if we wrap around.
             if (++m_currGen == 0) {
@@ -981,7 +982,7 @@ struct Direct3D12VDPRenderer::Impl {
         }
 
     private:
-        std::array<uint32, kArraySize> m_usage;
+        std::array<uint32, kArraySize> m_usage{};
         uint32 m_currGen = 1u;
     };
 
