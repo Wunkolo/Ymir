@@ -17,6 +17,7 @@
 #include <ymir/util/dev_assert.hpp>
 #include <ymir/util/dev_log.hpp>
 #include <ymir/util/dirty_bitmap.hpp>
+#include <ymir/util/inline.hpp>
 #include <ymir/util/scope_guard.hpp>
 #include <ymir/util/string.hpp>
 
@@ -27,6 +28,7 @@
 #include <cmrc/cmrc.hpp>
 CMRC_DECLARE(ymir_core_shaders);
 
+#include <array>
 #include <cassert>
 #include <concepts>
 #include <deque>
@@ -795,8 +797,8 @@ struct Direct3D12VDPRenderer::Impl {
     // Common rendering parameters
 
     struct EnhancementsParams {
-        HLSLuint deinterlace : 1;          //     0  Deinterlace
-        HLSLuint transparentMeshes : 1;    //     1  Render mesh sprites as transparent
+        HLSLuint deinterlace : 1;       //     0  Deinterlace
+        HLSLuint transparentMeshes : 1; //     1  Render mesh sprites as transparent
     };
     static_assert(sizeof(EnhancementsParams) == sizeof(HLSLuint));
 
@@ -943,6 +945,45 @@ struct Direct3D12VDPRenderer::Impl {
     static_assert(kMaxVDP1FragmentsPerDispatch <= 65535 * 64);
     static_assert(kMaxVDP1OITFragmentsPerDispatch <= 65535 * 64);
 
+    /// @brief Tracks memory usage with a generation map.
+    /// @tparam blockSizeBits determines the size of the block as a power of two
+    template <size_t vramSize, unsigned blockSizeBits = 5>
+    class MemoryUsageTracker {
+        static constexpr uint32 kBlockSize = 1u << blockSizeBits;
+        static constexpr uint32 kArraySize = vramSize >> blockSizeBits;
+
+    public:
+        /// @brief Clears usage across the whole VRAM.
+        FORCE_INLINE void Clear() {
+            // Clear the whole map if we wrap around.
+            if (++m_currGen == 0) {
+                std::fill(m_usage.begin(), m_usage.end(), 0u);
+                m_currGen = 1;
+            }
+        }
+
+        /// @brief Marks the specified range of bytes as in use.
+        /// @param[in] address the base address
+        /// @param[in] size the length of the range
+        FORCE_INLINE void MarkRange(uint32 address, uint32 size) {
+            uint32 first = address >> blockSizeBits;
+            uint32 last = (address + size - 1) >> blockSizeBits;
+            for (uint32 b = first; b <= last; ++b)
+                m_usage[b] = m_currGen;
+        }
+
+        /// @brief Checks if a particular address is marked as in use.
+        /// @param[in] address the address to check
+        /// @return `true` if the address is marked, `false` if not.
+        FORCE_INLINE bool IsInUse(uint32 address) const {
+            return m_usage[address >> blockSizeBits] == m_currGen;
+        }
+
+    private:
+        std::array<uint32, kArraySize> m_usage;
+        uint32 m_currGen = 1u;
+    };
+
     struct VDP1Resources {
         VDP1Resources() {
             memset(&cpuCommonRenderParams, 0, sizeof(cpuCommonRenderParams));
@@ -975,6 +1016,8 @@ struct Direct3D12VDPRenderer::Impl {
 
         /// @brief VRAM dirty bitmap.
         util::DirtyBitmap<kVRAMDirtyBitmapSize> vramDirty;
+        /// @brief Tracks VRAM usage by textures in a batch of spans.
+        MemoryUsageTracker<kVDP1VRAMSize> vramTexUsageTracker;
 
         // The VDP1 FBRAM buffer contains four FBRAM-sized buffers to accomodate the outputs of the enhancements.
         // The buffers are indexed as follows:
@@ -3775,6 +3818,12 @@ struct Direct3D12VDPRenderer::Impl {
     // VDP1 rendering
 
     void VDP1WriteVRAM(uint32 address) {
+        // Submit spans if the target address is in use by a textured polygon in the current batch
+        if (vdp1.vramTexUsageTracker.IsInUse(address)) [[unlikely]] {
+            devlog::debug<grp::dx12_vdp1>("VDP1 VRAM write to {:05X} which is in use by pending spans; submitting now",
+                                          address);
+            VDP1SubmitSpans();
+        }
         vdp1.vramDirty.Set(address >> VDP1Resources::kVRAMDirtyBitmapChunkSizeShift);
     }
 
@@ -4105,6 +4154,7 @@ struct Direct3D12VDPRenderer::Impl {
         util::ScopeGuard sgClearCounters{[&] {
             frameCtx.cpuSpanCount = 0;
             frameCtx.cpuCmdCount = 0;
+            vdp1.vramTexUsageTracker.Clear();
         }};
 
         // We should have a shader selected by now
@@ -4477,6 +4527,20 @@ struct Direct3D12VDPRenderer::Impl {
         bool linePlotted = false;
         int plottedSegmentsCount = 0;
         const int plottedSegmentsMax = quad.IsDegenerate() ? 2 : 1;
+
+        // Mark VRAM as in use for this texture
+        uint32 texSize = charSizeH * charSizeV;
+        switch (data.mode.colorMode) {
+        case 0: [[fallthrough]];       // 4 bpp, 16 colors, bank mode
+        case 1: texSize >>= 1u; break; // 4 bpp, 16 colors, lookup table mode
+        case 2: [[fallthrough]];       // 8 bpp, 64 colors, bank mode
+        case 3: [[fallthrough]];       // 8 bpp, 128 colors, bank mode
+        case 4: break;                 // 8 bpp, 256 colors, bank mode
+        case 5: texSize <<= 1u; break; // 16 bpp, 32768 colors, RGB mode
+        }
+        devlog::trace<grp::dx12_vdp1>("Tracking VRAM usage for texture: {:05X}..{:05X}", data.charAddr,
+                                      data.charAddr + texSize - 1);
+        vdp1.vramTexUsageTracker.MarkRange(data.charAddr, texSize);
 
         // TODO: cache this
         auto findEndCodeIndex = [&](uint32 v) -> uint32 {
