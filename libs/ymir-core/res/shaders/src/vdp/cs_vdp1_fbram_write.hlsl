@@ -21,8 +21,8 @@ RWByteAddressBuffer g_fbramOut : register(u1);
 // Parameters
 
 static const bool doubleDensity = BitTest(g_commonParams.displayParams, 3);
-static const uint displayFB = BitExtract(g_commonParams.displayParams, 7, 1) ^ 1;
-static const uint displayFBOffset = displayFB * kVDP1FBSize;
+static const uint drawFB = BitExtract(g_commonParams.displayParams, 7, 1);
+static const uint drawFBOffset = drawFB * kVDP1FBSize;
 
 static const bool deinterlace = BitTest(g_commonParams.enhancements, 0);
 static const bool transparentMeshes = BitTest(g_commonParams.enhancements, 1);
@@ -40,7 +40,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const FBRAMWrite write = g_fbramWrites[index];
 
     // The address is relative to the start of the current CPU-visible framebuffer
-    const uint address = write.address + displayFBOffset;
+    const uint address = write.address + drawFBOffset;
     uint value = g_fbramOut.Load(address);
     value &= write.andMask;
     value |= write.orMask;

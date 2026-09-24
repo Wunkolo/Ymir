@@ -1046,10 +1046,14 @@ struct Direct3D12VDPRenderer::Impl {
         D3D12Resource fbramDownloadBuffer;
         /// @brief Permanently mapped view of the FBRAM download buffer.
         void *fbramDownloadBufferPtr = nullptr;
-        /// @brief Current version of downloaded FBRAM.
-        UINT64 fbramDownloadVersion = 0;
         /// @brief Set by `VDP1DebugSyncFB` to lazily sync FBRAM when convenient.
         std::atomic_bool fbramDebugSyncRequest{false};
+        /// @brief Set to `true` when submitting spans to indicate that FBRAM contents may have been modified by the
+        /// GPU, requiring a download to synchronize the readback buffer.
+        bool fbramReadbackDirty = false;
+        /// @brief Whether the FBRAM readback buffer has new content to copy. Set when the FBRAM download command is
+        /// submitted.
+        uint32 fbramReadbackCopyPending = false;
 
         // ---------------------------------------------------------------------
 
@@ -2068,7 +2072,7 @@ struct Direct3D12VDPRenderer::Impl {
             return currFenceValue + 1;
         }
 
-        util::VoidResult<> MoveToNextFrame(D3D12Fence &fence, D3D12CommandQueue &cmdQueue) {
+        util::ValueResult<UINT64> IncrementFence(D3D12Fence &fence, D3D12CommandQueue &cmdQueue) {
             // Schedule a signal command in the queue
             FrameContext &currFrame = GetCurrentFrame();
             const UINT64 signalValue = currFenceValue + 1;
@@ -2076,6 +2080,15 @@ struct Direct3D12VDPRenderer::Impl {
                 return util::ErrorMessage{"Failed to signal fence"};
             }
             currFrame.signaledValue = signalValue;
+
+            // Set the fence value for the current frame
+            currFenceValue = signalValue;
+
+            return signalValue;
+        }
+
+        util::VoidResult<> MoveToNextFrame(D3D12Fence &fence, D3D12CommandQueue &cmdQueue) {
+            IncrementFence(fence, cmdQueue);
 
             // Update the frame index
             ++frameIndex;
@@ -2091,9 +2104,6 @@ struct Direct3D12VDPRenderer::Impl {
 
             // Reset frame
             nextFrame.Reset();
-
-            // Set the fence value for the next frame
-            currFenceValue = signalValue;
 
             return {};
         }
@@ -2317,9 +2327,10 @@ struct Direct3D12VDPRenderer::Impl {
 
         // VDP1 FBRAM writes buffer
         {
-            static constexpr UINT64 kSize = sizeof(VDP1FBRAMWrite) * kVDP1FBRAMSize;
+            static constexpr UINT64 kNumEntries = kVDP1FBRAMSize;
+            static constexpr UINT64 kEntrySize = sizeof(VDP1FBRAMWrite);
 
-            auto builder = vdp1.fbramWritesBuffer.BufferBuilder(kSize);
+            auto builder = vdp1.fbramWritesBuffer.BufferBuilder(kNumEntries * kEntrySize);
             builder.Flags(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
             if (HRESULT hr = builder.BuildCommitted(device); FAILED(hr)) {
                 return util::ErrorMessage{
@@ -2335,15 +2346,15 @@ struct Direct3D12VDPRenderer::Impl {
                 return util::ErrorMessage{"Could not allocate VDP1 FBRAM writes buffer SRV"};
             }
             const D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-                .Format = DXGI_FORMAT_R32_TYPELESS,
+                .Format = DXGI_FORMAT_UNKNOWN,
                 .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
                 .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                 .Buffer =
                     {
                         .FirstElement = 0,
-                        .NumElements = kSize / sizeof(uint32),
-                        .StructureByteStride = 0,
-                        .Flags = D3D12_BUFFER_SRV_FLAG_RAW,
+                        .NumElements = kNumEntries,
+                        .StructureByteStride = kEntrySize,
+                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
                     },
             };
             device->CreateShaderResourceView(vdp1.fbramWritesBuffer.GetPointer(), &srvDesc,
@@ -3830,15 +3841,34 @@ struct Direct3D12VDPRenderer::Impl {
     }
 
     void VDP1DownloadFBRAM() {
-        const UINT64 fenceValue = computeFence.GetCompletedValue();
-        if (vdp1.fbramDownloadVersion < fenceValue) {
-            vdp1.fbramDownloadVersion = fenceValue;
-            memcpy(vdpState.mem1.FBRAM.data(), vdp1.fbramDownloadBufferPtr, kVDP1FBRAMSize * 2);
+        // Bail out if there have been no changes
+        if (!vdp1.fbramReadbackCopyPending) {
+            return;
         }
+        vdp1.fbramReadbackCopyPending = false;
+
+        // Submit partial command list
+        auto result = SubmitCommandList();
+        if (!result) {
+            devlog::warn<grp::dx12_base>("Failed to submit command list: {}", result.Error().message);
+            return;
+        }
+
+        // Wait for it to complete
+        computeFence.Wait(INFINITE, result.Value());
+
+        // Copy downloaded FBRAM
+        memcpy(vdpState.mem1.FBRAM.data(), vdp1.fbramDownloadBufferPtr, kVDP1FBRAMSize * 2);
     }
 
     void VDP1SyncFB() {
-        frames.WaitForLatestFrame(computeFence, cmdQueue);
+        // Submit pending spans to ensure we're synced as far as possible
+        VDP1SubmitSpans();
+
+        // Copy FBRAM to readback buffer if modified
+        VDP1CopyFBRAMToReadback();
+
+        // Download FBRAM from readback buffer
         VDP1DownloadFBRAM();
     }
 
@@ -3951,8 +3981,6 @@ struct Direct3D12VDPRenderer::Impl {
                                         D3D12_BARRIER_ACCESS_COPY_DEST);
         barrierTracker.Flush(cmdList);
 
-        // Because we're syncing FBRAM at the beginning of a VDP2 frame, the display framebuffer bit has already been
-        // flipped by the VDP1 swap framebuffers operation. We'll have to pick the opposite buffer here to copy into.
         auto &fb = vdpState.mem1.FBRAM[vdpState.fbIndex.draw];
 
         // Group modified FBRAM writes into 32-bit chunks
@@ -4009,6 +4037,12 @@ struct Direct3D12VDPRenderer::Impl {
         cmdList->SetComputeRoot32BitConstants(0, 1, &writeCount, sizeof(vdp1.cpuCommonRenderParams) / sizeof(uint32));
         cmdList->SetComputeRootDescriptorTable(1, vdp1.fbramWriteDescs.gpuHandle);
         cmdList->Dispatch((writeCount + 63) / 64, 1, 1);
+
+        // Insert UAV barrier to ensure the following shaders see these changes
+        barrierTracker.UAVBuffer(vdp1.fbramBuffer.GetPointer());
+
+        // Mark GPU-side FBRAM as dirty
+        vdp1.fbramReadbackDirty = true;
 
         return {};
     }
@@ -4074,6 +4108,9 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Insert UAV barrier to ensure the following shaders see these changes
         barrierTracker.UAVBuffer(vdp1.fbramBuffer.GetPointer());
+
+        // Mark GPU-side FBRAM as dirty
+        vdp1.fbramReadbackDirty = true;
     }
 
     void VDP1SwapFramebuffer() {
@@ -4087,6 +4124,17 @@ struct Direct3D12VDPRenderer::Impl {
         } else {
             devlog::warn<grp::dx12_vdp1>("VDP1 span submission failed: {}", spanResult.Error().message);
         }
+
+        VDP1CopyFBRAMToReadback();
+    }
+
+    /// @brief Copies GPU-modified FBRAM to the readback buffer.
+    void VDP1CopyFBRAMToReadback() {
+        if (!vdp1.fbramReadbackDirty) {
+            return;
+        }
+        vdp1.fbramReadbackDirty = false;
+        vdp1.fbramReadbackCopyPending = true;
 
         // Download FBRAM
         barrierTracker.TransitionBuffer(vdp1.fbramBuffer.GetPointer(), D3D12_RESOURCE_STATE_COPY_SOURCE,
@@ -4153,7 +4201,7 @@ struct Direct3D12VDPRenderer::Impl {
 
         // Clear counters even if we fail to submit them to avoid crashes on extreme cases.
         // Errors should never happen, however.
-        util::ScopeGuard sgClearCounters{[&] {
+        util::ScopeGuard sgFinish{[&] {
             frameCtx.cpuSpanCount = 0;
             frameCtx.cpuCmdCount = 0;
             vdp1.vramTexUsageTracker.Clear();
@@ -4167,6 +4215,9 @@ struct Direct3D12VDPRenderer::Impl {
 
         if (auto result = VDP1FlushVRAM(); !result) {
             devlog::warn<grp::dx12_vdp1>("VDP1 VRAM flush failed: {}", result.Error().message);
+        }
+        if (auto result = VDP1FlushFBRAM(); !result) {
+            devlog::warn<grp::dx12_vdp1>("VDP1 FBRAM flush failed: {}", result.Error().message);
         }
 
         ID3D12Resource *uploadBufferPtr = uploadBuffer.GetBufferResource().GetPointer();
@@ -4325,6 +4376,8 @@ struct Direct3D12VDPRenderer::Impl {
             cmdList->SetComputeRootDescriptorTable(1, descs.gpuHandle);
             cmdList->Dispatch((mergeW + 7) / 8, (mergeH + 7) / 8, mergeZ);
         }
+
+        vdp1.fbramReadbackDirty = true;
 
         return true;
     }
@@ -6162,6 +6215,26 @@ struct Direct3D12VDPRenderer::Impl {
         ID3D12DescriptorHeap *heaps[] = {resourceHeap.GetPointer()};
         cmdList->Reset(nextFrame.cmdAlloc.GetPointer(), nullptr);
         cmdList->SetDescriptorHeaps(std::size(heaps), heaps);
+    }
+
+    /// @brief Submits the command list as is and restarts it in the same frame.
+    /// Signals and increments the compute fence without advancing the frame.
+    /// @return the signaled fence value or an error message
+    util::ValueResult<UINT64> SubmitCommandList() {
+        // Close and submit command list
+        cmdList->Close();
+        cmdQueue->ExecuteCommandLists(1, cmdList.GetAddressOfBase());
+
+        // Advance the fence
+        auto result = frames.IncrementFence(computeFence, cmdQueue);
+
+        // Setup command list
+        FrameContext &currFrame = frames.GetCurrentFrame();
+        ID3D12DescriptorHeap *heaps[] = {resourceHeap.GetPointer()};
+        cmdList->Reset(currFrame.cmdAlloc.GetPointer(), nullptr);
+        cmdList->SetDescriptorHeaps(std::size(heaps), heaps);
+
+        return result;
     }
 };
 
