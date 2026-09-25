@@ -626,6 +626,7 @@ void SoftwareVDPRenderer::VDP1RenderThread() {
             case EvtType::SwapBuffers: {
                 const auto fbIndex = m_state.fbIndex.draw;
                 m_state.mem1.FBRAM[fbIndex] = rctx.vdp1.mem.FBRAM[fbIndex];
+                rctx.vdp1.regs.LatchEraseParameters();
                 rctx.swapBuffersSignal.Set();
                 break;
             }
@@ -896,11 +897,19 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2UpdateCRAMCache(uint32 address) {
 // VDP1
 
 FORCE_INLINE VDP1Regs &SoftwareVDPRenderer::VDP1GetRegs() {
-    return m_state.regs1;
+    if (m_threadedVDP1Rendering) {
+        return m_vdp1RenderingContext.vdp1.regs;
+    } else {
+        return m_state.regs1;
+    }
 }
 
 FORCE_INLINE const VDP1Regs &SoftwareVDPRenderer::VDP1GetRegs() const {
-    return m_state.regs1;
+    if (m_threadedVDP1Rendering) {
+        return m_vdp1RenderingContext.vdp1.regs;
+    } else {
+        return m_state.regs1;
+    }
 }
 
 FORCE_INLINE SpriteFB &SoftwareVDPRenderer::VDP1GetRendererFBRAM(bool altFB, uint8 fbIndex) {
@@ -5415,7 +5424,7 @@ FORCE_INLINE static SpriteData::Special GetSpecialPattern(uint16 rawData) {
 template <bool applyMesh>
 FLATTEN FORCE_INLINE SpriteData SoftwareVDPRenderer::VDP2FetchSpriteData(const VDP2Regs &regs2, const SpriteFB &fbram,
                                                                          uint32 fbramOffset) {
-    const VDP1Regs &regs1 = VDP1GetRegs();
+    const VDP1Regs &regs1 = m_state.regs1;
 
     // Adjust offset based on VDP1 data size.
     // The majority of games actually set the sprite readout size to match the VDP1 sprite data size, but there's
