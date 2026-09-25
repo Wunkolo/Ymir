@@ -498,6 +498,14 @@ void SoftwareVDPRenderer::VDP1EndFrame() {
 // -----------------------------------------------------------------------------
 
 void SoftwareVDPRenderer::VDP2SetResolution(uint32 h, uint32 v, bool exclusive) {
+    if (m_threadedVDP2Rendering) {
+        m_vdp2RenderingContext.EnqueueEvent(VDP2RenderEvent::VDP2UpdateResolution(h, v, exclusive));
+    } else {
+        VDP2UpdateResolution(h, v, exclusive);
+    }
+}
+
+void SoftwareVDPRenderer::VDP2UpdateResolution(uint32 h, uint32 v, bool exclusive) {
     m_HRes = h;
     m_VRes = v;
     m_exclusiveMonitor = exclusive;
@@ -692,6 +700,10 @@ void SoftwareVDPRenderer::VDP2RenderThread() {
             case EvtType::VDP1EraseFramebuffer: rctx.eraseFramebufferReadySignal.Set(); break;
             case EvtType::VDP1SwapFramebuffer: rctx.framebufferSwapSignal.Set(); break;
 
+            case EvtType::VDP2UpdateResolution:
+                VDP2UpdateResolution(event.updateResolution.h, event.updateResolution.v,
+                                     event.updateResolution.exclusive);
+                break;
             case EvtType::VDP2BeginFrame: VDP2InitFrame(); break;
             case EvtType::VDP2UpdateEnabledBGs: VDP2UpdateEnabledBGs(); break;
             case EvtType::VDP2DrawLine: //
@@ -2616,8 +2628,8 @@ NO_INLINE void SoftwareVDPRenderer::VDP2DrawSpriteLayer(uint32 y, const VDP2Regs
     // 2x horz resolution: VDP1 TVM=000 and VDP2 HRESO=01x
     // 1/2x horz readout:  VDP1 TVM=001 and VDP2 HRESO=00x
     const bool exclMon = (regs2.TVMD.HRESOn & 0b100) != 0;
-    const bool doubleResH = !regs1.hdtvEnable && !rotate && !regs1.pixel8Bits && (regs2.TVMD.HRESOn & 0b110) == 0b010;
-    const bool halfResH = !regs1.hdtvEnable && !rotate && regs1.pixel8Bits && (regs2.TVMD.HRESOn & 0b110) == 0b000;
+    const bool doubleResH = !regs1.hdtvEnable && !regs1.pixel8Bits && (regs2.TVMD.HRESOn & 0b110) == 0b010;
+    const bool halfResH = !regs1.hdtvEnable && regs1.pixel8Bits && (regs2.TVMD.HRESOn & 0b110) == 0b000;
     const uint32 xOutputShift = doubleResH || exclMon ? 1 : 0;
     const uint32 xReadoutShift = halfResH ? 1 : 0;
     const uint32 maxX = m_HRes >> xOutputShift;
@@ -2835,7 +2847,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2DrawNormalBG(const VDP2Regs &regs2, u
 
     LayerOutput &layerOut = m_layerOutputs[altField][bgIndex + 2];
     VRAMFetcher &vramFetcher = m_vramFetchers[altField][bgIndex];
-    auto windowState = std::span<const bool>{m_bgWindows[altField][bgIndex + 1]}.first(m_HRes);
+    auto windowState = std::span<const bool>{m_bgWindows[altField][bgIndex + 1]};
 
     const uint32 cf = static_cast<uint32>(bgParams.colorFormat);
     if (bgParams.bitmap) {
@@ -2912,7 +2924,7 @@ FORCE_INLINE void SoftwareVDPRenderer::VDP2DrawRotationBG(const VDP2Regs &regs2,
     const BGParams &bgParams = regs2.bgParams[bgIndex];
     LayerOutput &layerOut = m_layerOutputs[altField][bgIndex + 1];
     VRAMFetcher &vramFetcher = m_vramFetchers[altField][bgIndex + 4];
-    auto windowState = std::span<const bool>{m_bgWindows[altField][bgIndex]}.first(m_HRes);
+    auto windowState = std::span<const bool>{m_bgWindows[altField][bgIndex]};
 
     const uint32 cf = static_cast<uint32>(bgParams.colorFormat);
     if (bgParams.bitmap) {
