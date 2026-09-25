@@ -159,8 +159,8 @@ bool IsColorCalcEnabled(uint layer, uint2 pos) {
         }
         const uint attrs = g_spriteAttrsIn[uint3(pos, 0)];
         const uint priority = BitExtract(layerAttrs, 0, 3);
-        const uint value = BitExtract(g_commonParams.spriteParams, 11, 3);
-        const uint cond = BitExtract(g_commonParams.spriteParams, 14, 2);
+        const uint value = BitExtract(g_commonParams.spriteParams, 12, 3);
+        const uint cond = BitExtract(g_commonParams.spriteParams, 15, 2);
         switch (cond) {
             case kSpriteCCCondPriorityLE:
                 return priority <= value;
@@ -429,7 +429,7 @@ uint3 Compose(uint2 basePos) {
     const uint spritePriority = BitExtract(spriteOutput.a, 0, 3);
     if (spritePriority >= layerPrios[0]) {
         const uint spriteAttrs = g_spriteAttrsIn[uint3(pos, 0)];
-        const bool useSpriteWindow = BitTest(g_commonParams.spriteParams, 19);
+        const bool useSpriteWindow = BitTest(g_commonParams.spriteParams, 20);
         const bool isNormalShadow = BitExtract(spriteAttrs, kSpriteAttrBitSpecial, 2) == kSpriteDataShadow;
         const bool isMSBShadow = !useSpriteWindow && BitTest(spriteAttrs, kSpriteAttrBitShadowWindow);
         if (isNormalShadow || isMSBShadow) {
