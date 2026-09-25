@@ -22,7 +22,8 @@ Introduces save state file version 14.
 - Debugger: Added RBG0 and RBG1 line color single stack views to the VDP2 debug overlay.
 - Debugger: Added basic VDP2 registers view.
 - Graphics: New graphics backend, adding support for native graphics APIs:
-    - Direct3D 11 and 12 on Windows (@StrikerX3)
+    - Direct3D 11 on Windows (TBD)
+    - Direct3D 12 on Windows (@StrikerX3)
     - Vulkan on Windows and Linux (TBD)
     - Metal on macOS (#929; @SternXD)
     - SDL Renderer wherever it's supported (@StrikerX3)
@@ -45,7 +46,7 @@ Introduces save state file version 14.
 
 - App: Don't persist window geometry in full screen mode.
 - App: Initialize MIDI subsystem asynchronously. Fixes some cases where the application takes a long time to start up.
-- App: Reset window geometry if it matches the bounds of a display.
+- App: Reset window geometry if it matches the bounds of a display to prevent "remember window geometry" from loading full screen coordinates.
 - Backup RAM: Fix crash when attempting to load a backup RAM cartridge with the default path.
 - Backup RAM: Remove strict language check when importing files. Fixes importing save files from Kronos's backup RAM cartridges. (#942)
 - CD Block (HLE): Report current CD status and raise CMOK HIRQ signal when processing unimplemented commands.
@@ -58,10 +59,11 @@ Introduces save state file version 14.
     - Mega Man X3 / Rockman X3: sprites are not glitched anymore. (#244)
     - Metal Fighter Miku: goes in-game, no longer stuck after start menu. (#466)
     - Soviet Strike: VDP1 graphics no longer flicker.
-- GameDB: Force-enable SH-2 cache emulation for Dino Island to fix palette glitches. (#764)
-- GameDB: Force-enable SH-2 cache emulation for Dragon Force II to fix black screen when entering 100 vs 100 battles. (#945)
-- GameDB: Force-enable SH-2 cache emulation for Hissatsu! to fix crash at startup. (#943)
-- GameDB: Force-enable SH-2 cache emulation for No-appointment Gals Olympos to fix crash during animations.
+- GameDB: Force-enable SH-2 cache emulation for multiple games:
+    - Dino Island: fix palette glitches. (#764)
+    - Dragon Force II: fix black screen when entering 100 vs 100 battles. (#945)
+    - Hissatsu!: fix crash at startup. (#943)
+    - No-appointment Gals Olympos: fix crash during animations.
 - GameDB: Force fast bus timings on Resident Evil to fix start menu crashes. (#907)
 - GameDB: Slow down VDP1 execution speed in 3D Baseball to fix team name plates and announcer voice line glitches. (#593)
 - GUI: Reinitialize style from scratch when rescaling GUI elements. Fixes Settings windows (and probably others) from growing extremely large when constantly switching display scales.
