@@ -61,6 +61,7 @@ Introduces save state file version 14.
 - GameDB: Force-enable SH-2 cache emulation for Dino Island to fix palette glitches. (#764)
 - GameDB: Force-enable SH-2 cache emulation for Dragon Force II to fix black screen when entering 100 vs 100 battles. (#945)
 - GameDB: Force-enable SH-2 cache emulation for Hissatsu! to fix crash at startup. (#943)
+- GameDB: Force-enable SH-2 cache emulation for No-appointment Gals Olympos to fix crash during animations.
 - GameDB: Force fast bus timings on Resident Evil to fix start menu crashes. (#907)
 - GameDB: Slow down VDP1 execution speed in 3D Baseball to fix team name plates and announcer voice line glitches. (#593)
 - GUI: Reinitialize style from scratch when rescaling GUI elements. Fixes Settings windows (and probably others) from growing extremely large when constantly switching display scales.
@@ -78,7 +79,7 @@ Introduces save state file version 14.
     - Guardian Heroes no longer gets stuck on level transitions. (#951)
     - Gekitotsu Koushien no longer crashes when going in-game. (#576)
     - Madden NFL 97 (Europe) now goes in-game. (#522)
-    - No-appointment Gals Olympos now goes in-game, but it can crash during the spinning animation.
+    - No-appointment Gals Olympos now goes in-game.
     - Ten Pin Alley now goes in-game.
     - UEFA Euro 96 - England now goes in-game. (#486)
 - SMPC: Update peripheral PDR1/2 registers when reading and when updating EXLE. Fixes many cases of games not recognizing Virtua Gun inputs or missing shots. (#787)
