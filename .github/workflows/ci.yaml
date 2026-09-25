@@ -246,6 +246,9 @@ jobs:
   build-freebsd:
     name: freebsd-${{ matrix.arch.name }}-${{ matrix.build-set.name }}
     runs-on: ${{ matrix.arch.runner }}
+    defaults:
+      run:
+        shell: cpa.sh {0}
 
     strategy:
       fail-fast: false
@@ -275,50 +278,61 @@ jobs:
 
       # TODO: configure vcpkg cache
 
-      - uses: cross-platform-actions/action@492b0c80085400348c599edace11141a4ee73524
-        env:
-          CXX: clang++21
-          CC: clang21
+      - name: Start FreeBSD VM
+        uses: cross-platform-actions/action@e0b9770014ba65d5e0815f15b74031c3a635f641
         with:
           operating_system: freebsd
           architecture: ${{ matrix.arch.name }}
-          version: '15.0'
-          environment_variables: CXX CC
-          run: |
-            sudo pkg upgrade -y
-            sudo pkg install -y cmake evdev-proto git gmake libX11 libXcursor libXext \
-              libXfixes libXi libXrandr libXrender libXScrnSaver libXtst libglvnd \
-              libinotify llvm21 ninja patchelf pkgconf python3 vulkan-loader zip \
-              glslang shaderc vulkan-headers
+          version: '15.1'
 
-            if [ ${{ matrix.build-set.library-only}} = 'no' ]; then
-              ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.sh
+      - name: Install dependencies
+        run: |
+          sudo pkg upgrade -y
+          sudo pkg install -y cmake evdev-proto git gmake libX11 libXcursor libXext \
+            libXfixes libXi libXrandr libXrender libXScrnSaver libXtst libglvnd \
+            libinotify llvm21 ninja patchelf pkgconf python3 vulkan-loader zip
 
-              cmake -B ${{ steps.strings.outputs.build-output-dir }} \
-                -DCMAKE_BUILD_TYPE=Debug \
-                -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-                -DBUILD_SHARED_LIBS=OFF \
-                -DYmir_ENABLE_DEVLOG=OFF \
-                -DYmir_ENABLE_IMGUI_DEMO=OFF \
-                -DYmir_ENABLE_UPDATE_CHECKS=ON \
-                -DYmir_ENABLE_SANDBOX=OFF \
-                -DYmir_ENABLE_YMDASM=ON \
-                -DYmir_ENABLE_IPO=OFF \
-                -DYmir_LIBRARY_ONLY=OFF \
-                -S ${{ github.workspace }} \
-                -G Ninja
-            else
-              cmake -B ${{ steps.strings.outputs.build-output-dir }} \
-                -DCMAKE_BUILD_TYPE=Debug \
-                -DBUILD_SHARED_LIBS=OFF \
-                -DYmir_ENABLE_DEVLOG=OFF \
-                -DYmir_ENABLE_IPO=OFF \
-                -DYmir_LIBRARY_ONLY=ON \
-                -S ${{ github.workspace }} \
-                -G Ninja
-            fi
+      - name: Bootstrap vcpkg
+        if: ${{ matrix.build-set.library-only == 'no' }}
+        env:
+          CC: clang21
+          CXX: clang++21
+        shell: cpa.sh {0} --environment-variables CC CXX
+        run: ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.sh
 
-            cmake --build ${{ steps.strings.outputs.build-output-dir }} --parallel
+      - name: Configure CMake
+        run: |
+          if [ ${{ matrix.build-set.library-only }} = 'no' ]; then
+            cmake -B ${{ steps.strings.outputs.build-output-dir }} \
+              -DCMAKE_CXX_COMPILER=clang++21 \
+              -DCMAKE_C_COMPILER=clang21 \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DYmir_ENABLE_DEVLOG=OFF \
+              -DYmir_ENABLE_IMGUI_DEMO=OFF \
+              -DYmir_ENABLE_UPDATE_CHECKS=ON \
+              -DYmir_ENABLE_SANDBOX=OFF \
+              -DYmir_ENABLE_YMDASM=ON \
+              -DYmir_ENABLE_IPO=OFF \
+              -DYmir_LIBRARY_ONLY=OFF \
+              -S ${{ github.workspace }} \
+              -G Ninja
+          else
+            cmake -B ${{ steps.strings.outputs.build-output-dir }} \
+              -DCMAKE_CXX_COMPILER=clang++21 \
+              -DCMAKE_C_COMPILER=clang21 \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DYmir_ENABLE_DEVLOG=OFF \
+              -DYmir_ENABLE_IPO=OFF \
+              -DYmir_LIBRARY_ONLY=ON \
+              -S ${{ github.workspace }} \
+              -G Ninja
+          fi
+
+      - name: Build
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --parallel
 
   build-macos:
     name: macos-${{ matrix.arch.name }}-${{ matrix.build-set.name }}

@@ -9,11 +9,11 @@
 #include <mutex>
 #include <string>
 
-#if !defined(__APPLE__)
+#if !defined(__APPLE__) && !defined(__FreeBSD__)
     #define YMIR_MIDI_ASYNC_INIT
 #endif
 
-// Apple's libc++ does not support std::atomic<std::shared_ptr<T>>.
+// Apple's and FreeBSD's libc++ does not support std::atomic<std::shared_ptr<T>>.
 // Since MIDI initialization on those systems never seem to cause problems, we'll just not use threads.
 #if defined(YMIR_MIDI_ASYNC_INIT)
     #include <atomic>
