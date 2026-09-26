@@ -32,8 +32,10 @@ static const bool hiResH = BitTest(g_commonParams.displayParams, 8);
 static const bool palMode = BitTest(g_commonParams.displayParams, 9);
 static const uint hreso = BitExtract(g_commonParams.displayParams, 10, 3);
 static const uint vreso = BitExtract(g_commonParams.displayParams, 13, palMode ? 2 : 1);
-static const uint displayResH = kResolutionsH[hreso & 3u]; // 3rd bit intentionally ignored
-static const uint displayResV = exclusiveMonitor ? 480 : kResolutionsV[vreso];
+static const uint2 displayRes = uint2(
+    kResolutionsH[hreso & 3u], // 3rd bit intentionally ignored
+    exclusiveMonitor ? 480 : kResolutionsV[vreso]
+);
 
 static const bool coeffTableCRAM = BitTest(g_commonParams.rotParams, 0);
 static const uint coeffDataAccess = BitExtract(g_commonParams.rotParams, 1, 4);
@@ -905,14 +907,14 @@ uint4 DrawNBG(uint2 pos, // pixel coordinates
                 scrollPos.x -= 8;
             } else {
                 // Left edge of the screen - read rightmost character from previous row
-                scrollPos.x += displayResH;
+                scrollPos.x += displayRes.x;
                 if (pos.y >= 8) {
                     // Not at top edge of the screen - read previous row
                     scrollPos.y -= 8;
                 } else {
                     // At top edge of the screen - read last character read the previous screen
                     // TODO: read character from the previous screen (store on CPU side)
-                    scrollPos.y += displayResV - 8;
+                    scrollPos.y += displayRes.y - 8;
                 }
             }
         }
