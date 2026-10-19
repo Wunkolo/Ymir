@@ -123,6 +123,10 @@ util::VoidResult<> VulkanSwapchain::RecreateSwapchain(std::optional<vk::Extent2D
         m_swapSemaphoreImageAcquired.clear();
         m_swapSemaphorePresentReady.clear();
         m_swapchainInstance.reset();
+
+        if (nextSwapIndex != nullptr) {
+            *nextSwapIndex = 0u;
+        }
         return {};
     }
 
