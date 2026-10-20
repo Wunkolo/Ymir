@@ -77,6 +77,16 @@ VulkanSwapchain::VulkanSwapchain(vk::Device device, vk::PhysicalDevice physicalD
     , m_presentQueueFamily(presentQueueFamily)
     , m_presentQueue(presentQueue) {}
 
+VulkanSwapchain::~VulkanSwapchain() {
+    // Unfortunately this is the best way to ensure that any currently in-flight
+    // frames are done.
+    // TODO: VK_{KHR,EXT}_swapchain_maintenance1 has better swapchain
+    // waiting/cleanup mechanisms that should be used here
+    if (const vk::Result waitResult = m_presentQueue.waitIdle(); waitResult != vk::Result::eSuccess) {
+        // return util::ErrorMessage{"Error waiting on present queue to idle:" + vk::to_string(waitResult)};
+    }
+}
+
 util::VoidResult<> VulkanSwapchain::RecreateSwapchain(std::optional<vk::Extent2D> newExtent,
                                                       std::optional<vk::SwapchainKHR> oldSwapchain,
                                                       uint8 *nextSwapIndex, vk::Fence nextSwapSignalFence) {

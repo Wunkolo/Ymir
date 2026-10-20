@@ -58,7 +58,7 @@ private:
 
 public:
     VulkanSwapchain(VulkanSwapchain &&) = default;
-    ~VulkanSwapchain() = default;
+    ~VulkanSwapchain();
 
     [[nodiscard]] const vk::SurfaceFormatKHR &GetSurfaceFormat() const {
         return m_surfaceFormat;
