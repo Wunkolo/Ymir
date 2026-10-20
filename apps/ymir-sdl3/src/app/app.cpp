@@ -1708,6 +1708,14 @@ void App::RunEmulator() {
                     m_displayService.PersistWindowGeometry();
                 }
                 break;
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+            case SDL_EVENT_WINDOW_RESTORED:
+                // Get window size
+                int width, height;
+                SDL_GetWindowSize(screen.window, &width, &height);
+                m_graphicsService.ResizeFramebuffer(width, height);
+                break;
+            case SDL_EVENT_WINDOW_MINIMIZED:
             case SDL_EVENT_WINDOW_RESIZED:
                 m_graphicsService.ResizeFramebuffer(evt.window.data1, evt.window.data2);
                 [[fallthrough]];
