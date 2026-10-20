@@ -116,17 +116,25 @@ util::VoidResult<> VulkanSwapchain::RecreateSwapchain(std::optional<vk::Extent2D
 
     /// Swapchain image extents
     if (surfaceCapabilities.currentExtent.width == 0 || surfaceCapabilities.currentExtent.height == 0) {
-        // Window is likely minimized
+        // Window is likely minimized, put the swapchain into an invalid state.
+        m_swapImageCount = 0u;
+        m_semaphoreCount = 0u;
+        m_swapImageExtents = vk::Extent2D{
+            .width = 0u,
+            .height = 0u,
+        };
         m_swapImages.clear();
         m_swapImageViews.clear();
         m_swapFramebuffers.clear();
-        m_swapSemaphoreImageAcquired.clear();
-        m_swapSemaphorePresentReady.clear();
-        m_swapchainInstance.reset();
-
+        m_curImageAcquireSemaphoreIndex = 0u;
         if (nextSwapIndex != nullptr) {
             *nextSwapIndex = 0u;
         }
+        m_swapSemaphoreImageAcquired.clear();
+        m_nextSwapImageIndex = 0u;
+        m_swapSemaphorePresentReady.clear();
+        m_swapchainInstance.reset();
+
         return {};
     }
 
@@ -372,7 +380,11 @@ util::ValueResult<vk::Semaphore> VulkanSwapchain::AcquireNextImage(uint8_t *next
     case vk::Result::eErrorOutOfDateKHR: {
         // Swapchain needs to be recreated
         if (const auto recreateResult = RecreateSwapchain({}, m_swapchainInstance.get(), nextSwapIndex, signalFence)) {
-            return GetCurrentImageAcquiredSemaphore();
+            if (IsValid()) {
+                return GetCurrentImageAcquiredSemaphore();
+            } else {
+                return vk::Semaphore{};
+            }
         } else {
             return recreateResult.Error();
         }

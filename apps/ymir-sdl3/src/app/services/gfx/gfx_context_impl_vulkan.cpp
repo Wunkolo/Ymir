@@ -681,6 +681,10 @@ struct VulkanGraphicsContext::Impl {
     }
 
     util::VoidResult<> BeginFrame() {
+        if (!swapchain->IsValid()) {
+            // Swapchain invalid, skip drawing this frame
+            return {};
+        }
 
         const FrameContext &currFrame = GetCurrentFrameContext();
 
@@ -765,8 +769,13 @@ struct VulkanGraphicsContext::Impl {
     }
 
     util::VoidResult<> EndFrame() {
+        if (!swapchain->IsValid()) {
+            // Swapchain invalid, skip drawing this frame
+            return {};
+        }
 
         const FrameContext &currFrame = GetCurrentFrameContext();
+
         currFrame.mainCommandBuffer->endRenderPass();
 
         // Transition present-image to be present-ready
@@ -801,6 +810,12 @@ struct VulkanGraphicsContext::Impl {
     }
 
     util::ValueResult<PresentResult> Present() {
+
+        if (!swapchain->IsValid()) {
+            // Swapchain invalid, skip drawing.
+            return PresentResult::Occluded;
+        }
+
         if (auto result = EndFrame(); !result) {
             return util::ErrorMessage{fmt::format("Could not end frame: {}", result.Error().message)};
         }
@@ -902,7 +917,12 @@ struct VulkanGraphicsContext::Impl {
     util::VoidResult<> MoveToNextFrame() {
 
         // Update the frame index
-        swapchain->AcquireNextImage(&frameIndex);
+        if (swapchain->IsValid()) {
+            swapchain->AcquireNextImage(&frameIndex);
+        } else {
+            // Swapchain invalid, skip drawing.
+            return {};
+        }
 
         FrameContext &currFrame = GetCurrentFrameContext();
 
@@ -1713,6 +1733,11 @@ struct VulkanGraphicsContext::Impl {
 
     util::VoidResult<> DrawTextureRotated(TextureID id, const FRect &srcRect, const FRect &dstRect, double rotAngle,
                                           const FPoint2D *rotPivot) {
+
+        if (!swapchain->IsValid()) {
+            // Swapchain invalid, skip drawing.
+            return {};
+        }
         TextureInstance *instance = GetTexture(id);
         if (instance == nullptr) {
             return util::ErrorMessage{"Invalid texture"};
@@ -1847,7 +1872,7 @@ bool VulkanGraphicsContext::ImGuiInit() {
 }
 
 void VulkanGraphicsContext::ImGuiShutdown() {
-    if (m_imguiInitialized) {
+    if (m_imguiInitialized && m_impl->swapchain->IsValid()) {
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         m_imguiInitialized = false;
@@ -1855,7 +1880,7 @@ void VulkanGraphicsContext::ImGuiShutdown() {
 }
 
 void VulkanGraphicsContext::ImGuiNewFrame() {
-    if (m_imguiInitialized) {
+    if (m_imguiInitialized && m_impl->swapchain->IsValid()) {
         m_impl->BeginFrame();
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -1863,7 +1888,7 @@ void VulkanGraphicsContext::ImGuiNewFrame() {
 }
 
 void VulkanGraphicsContext::ImGuiRenderFrame() {
-    if (m_imguiInitialized) {
+    if (m_imguiInitialized && m_impl->swapchain->IsValid()) {
         const vk::CommandBuffer commandBuffer = m_impl->GetCurrentFrameContext().mainCommandBuffer.get();
 
         const DebugLabelScope debugScope(commandBuffer, {0.25f, 0.25f, 0.5f, 1.0f}, "ImGuiRenderFrame");
@@ -1922,8 +1947,8 @@ util::VoidResult<> VulkanGraphicsContext::DrawTextureRotated(TextureID id, const
 }
 
 std::optional<DisplayTextureSpec> VulkanGraphicsContext::AcquireCurrentDisplayOutputTexture() {
-    // TODO: find and update index of the latest complete display output texture, emit transition to copy destination
-    // barrier and return its texture ID, width and height
+    // TODO: find and update index of the latest complete display output texture, emit transition to copy
+    // destination barrier and return its texture ID, width and height
     return std::nullopt;
 }
 
@@ -1937,8 +1962,8 @@ void VulkanGraphicsContext::ResetDisplayOutputTextures() {
 }
 
 util::ValueResult<size_t> VulkanGraphicsContext::DownloadDisplayOutputTexture(void *buffer, size_t size) {
-    // TODO: if using hardware renderer, copy latest display output texture to buffer and return number of bytes copied.
-    // Return 0 if using software renderer.
+    // TODO: if using hardware renderer, copy latest display output texture to buffer and return number of bytes
+    // copied. Return 0 if using software renderer.
     return util::ErrorMessage{"Unimplemented"};
 }
 
