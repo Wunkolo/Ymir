@@ -24,9 +24,9 @@ struct VulkanGraphicsContextSpec {
     /// @brief (Required) Pointer to SDL3 window
     SDL_Window *window = nullptr;
 
-    /// @brief (Optional) Target Vulkan physical device handle(vk::PhysicalDevice/VkPhysicalDevice).
-    /// Defaults to the system default first device if nullptr.
-    void *device = nullptr;
+    /// @brief (Optional) Target Vulkan physical device UUID.
+    /// Defaults to the first device otherwise.
+    std::array<uint8, 16> deviceUUID = {};
 };
 
 } // namespace app::gfx

@@ -17,8 +17,8 @@ struct VulkanGraphicsAdapter {
     /// @brief Device description, typically the GPU's name.
     std::string name;
 
-    /// @brief Opaque handle to the Vulkan physical device(vk::PhysicalDevice/VkPhysicalDevice)
-    void *device = nullptr;
+    /// @brief Device UUID
+    std::array<uint8, 16> UUID;
 };
 
 /// @brief Enumerates graphics adapters in the system using Vulkan.
@@ -28,9 +28,9 @@ void EnumerateVulkanGraphicsAdapters();
 /// @return a list of graphics adapters. The first device in the list is the default adapter.
 const std::vector<VulkanGraphicsAdapter> &GetVulkanGraphicsAdapters();
 
-/// @brief Retrieves a Vulkan graphics adapter device pointer by its unique identifier.
+/// @brief Retrieves a Vulkan physical device UUID by its adapter id .
 /// @param[in] id the adapter's unique identifier
-/// @return a pointer to the corresponding graphics adapter device (id<MTLDevice>) if found, `nullptr` otherwise
-void *GetVulkanDeviceByID(AdapterID id);
+/// @return the corresponding graphics adapter device UUID if found, `std::array<uint8, 16>{}` otherwise
+std::array<uint8, 16> GetVulkanDeviceUUIDByID(AdapterID id);
 
 } // namespace app::gfx

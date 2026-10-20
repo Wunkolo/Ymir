@@ -97,9 +97,9 @@ util::ObjectResult<IGraphicsContext> GraphicsService::CreateGraphicsContext(cons
 #endif
 #if YMIR_PLATFORM_HAS_VULKAN
     case Backend::Vulkan:
-        return ConvertResult(VulkanGraphicsContext::Create({
+        return ConvertResult(VulkanGraphicsContext::Create(VulkanGraphicsContextSpec{
             .window = spec.window,
-            .device = spec.adapter ? gfx::GetVulkanDeviceByID(*spec.adapter) : nullptr
+            .deviceUUID = spec.adapter ? gfx::GetVulkanDeviceUUIDByID(*spec.adapter) : std::array<uint8, 16>{},
         }));
 #endif
 #if YMIR_PLATFORM_HAS_METAL

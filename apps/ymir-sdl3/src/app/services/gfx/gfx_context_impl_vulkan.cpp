@@ -223,9 +223,18 @@ struct VulkanGraphicsContext::Impl {
 #endif
 
         // Determine physical device
+        if (spec.deviceUUID != std::array<uint8, 16>{}) {
+            for (const vk::PhysicalDevice &curPhysicalDevice : instance->enumeratePhysicalDevices().value) {
+                const auto physicalDevicePropertychain =
+                    curPhysicalDevice.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceIDProperties>();
+                const vk::PhysicalDeviceIDProperties &physicalDeviceIDProperties =
+                    physicalDevicePropertychain.get<vk::PhysicalDeviceIDProperties>();
 
-        if (spec.device) {
-            physicalDevice = (VkPhysicalDevice)spec.device;
+                if (physicalDeviceIDProperties.deviceUUID == spec.deviceUUID) {
+                    physicalDevice = curPhysicalDevice;
+                    break;
+                }
+            }
         } else {
             if (const auto enumerateResult = instance->enumeratePhysicalDevices(); enumerateResult.has_value()) {
                 // No device specified, select the first device

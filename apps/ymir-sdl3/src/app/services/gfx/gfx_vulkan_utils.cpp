@@ -18,7 +18,13 @@ void EnumerateVulkanGraphicsAdapters() {
 
     if (const auto enumerate_result = instance->enumeratePhysicalDevices(); enumerate_result.has_value()) {
         for (uint8 device_index = 0; const vk::PhysicalDevice &physical_device : enumerate_result.value) {
-            const vk::PhysicalDeviceProperties physical_device_properties = physical_device.getProperties();
+            const auto physical_device_propertychain =
+                physical_device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceIDProperties>();
+
+            const vk::PhysicalDeviceProperties &physical_device_properties =
+                physical_device_propertychain.get<vk::PhysicalDeviceProperties2>().properties;
+            const vk::PhysicalDeviceIDProperties &physical_device_id_properties =
+                physical_device_propertychain.get<vk::PhysicalDeviceIDProperties>();
 
             // TODO: Use VK_EXT_pci_bus_info to get the device's exact pcie bus info
 
@@ -30,7 +36,7 @@ void EnumerateVulkanGraphicsAdapters() {
                         .function = 0,
                     },
                 .name = physical_device_properties.deviceName,
-                .device = physical_device,
+                .UUID = physical_device_id_properties.deviceUUID,
             });
 
             ++device_index;
@@ -46,14 +52,14 @@ const std::vector<VulkanGraphicsAdapter> &GetVulkanGraphicsAdapters() {
     return g_VulkanAdapters;
 }
 
-void *GetVulkanDeviceByID(AdapterID id) {
+std::array<uint8, 16> GetVulkanDeviceUUIDByID(AdapterID id) {
     const auto &adapters = GetVulkanGraphicsAdapters();
     for (const auto &adapter : adapters) {
         if (adapter.id == id) {
-            return adapter.device;
+            return adapter.UUID;
         }
     }
-    return nullptr;
+    return std::array<uint8, 16>{};
 }
 
 } // namespace app::gfx
