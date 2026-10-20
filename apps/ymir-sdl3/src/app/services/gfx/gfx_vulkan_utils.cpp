@@ -41,6 +41,7 @@ void EnumerateVulkanGraphicsAdapters() {
 const std::vector<VulkanGraphicsAdapter> &GetVulkanGraphicsAdapters() {
     if (!s_adaptersEnumerated) {
         EnumerateVulkanGraphicsAdapters();
+        s_adaptersEnumerated = true;
     }
     return g_VulkanAdapters;
 }
