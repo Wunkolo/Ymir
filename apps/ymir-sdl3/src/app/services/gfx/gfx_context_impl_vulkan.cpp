@@ -1051,6 +1051,78 @@ struct VulkanGraphicsContext::Impl {
                                                                                         : samplerLinear.get());
         descriptorUpdateBatch->Flush();
 
+        FrameContext &currFrame = GetCurrentFrameContext();
+
+        // allocate new transient command buffer
+        // TODO: Recycle transient command buffers to batch multiple texture transitions into one command buffer.
+        vk::CommandBuffer commandBuffer{};
+
+        const vk::CommandBufferAllocateInfo commandBufferInfo{
+            .commandPool = currFrame.commandPool.get(),
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1,
+        };
+        if (auto allocateResult = device->allocateCommandBuffersUnique(commandBufferInfo);
+            allocateResult.result == vk::Result::eSuccess) {
+            commandBuffer = currFrame.transcientCommandBuffers.emplace_back(std::move(allocateResult.value[0])).get();
+        }
+
+        const vk::CommandBufferBeginInfo beginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        };
+        if (const auto beginResult = commandBuffer.begin(beginInfo); beginResult != vk::Result::eSuccess) {
+            return util::ErrorMessage{fmt::format("Error beginning command buffer: {}", vk::to_string(beginResult))};
+        }
+
+        /// Transition texture
+        {
+            DebugLabelScope debugScope(commandBuffer, {1.0f, 1.0f, 0.0f, 1.0f}, "InitTexture {}", spec.name);
+
+            // Transition texture for sampling
+            const vk::ImageMemoryBarrier imagePostBarrier{
+                .srcAccessMask = {},
+                .dstAccessMask = vk::AccessFlagBits::eMemoryRead,
+                .oldLayout = vk::ImageLayout::eUndefined,
+                .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .image = newTexture.image.get(),
+                .subresourceRange =
+                    vk::ImageSubresourceRange{
+                        .aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1,
+                    },
+            };
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
+                                          vk::DependencyFlagBits::eByRegion, {}, {}, {imagePostBarrier});
+        }
+        if (const auto endResult = commandBuffer.end(); endResult != vk::Result::eSuccess) {
+            return util::ErrorMessage{fmt::format("Could not end frame command buffer: {}", vk::to_string(endResult))};
+        }
+
+        const vk::StructureChain<vk::SubmitInfo, vk::TimelineSemaphoreSubmitInfo> submitInfoChain{
+            vk::SubmitInfo{
+                .commandBufferCount = 1,
+                .pCommandBuffers = &commandBuffer,
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = &mainSemaphore.get(),
+            },
+            vk::TimelineSemaphoreSubmitInfo{
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues = &mainSemaphoreTick,
+            },
+        };
+
+        if (auto submitResult = renderQueue.submit(submitInfoChain.get(), {}); submitResult != vk::Result::eSuccess) {
+            return util::ErrorMessage{
+                fmt::format("Error submitting command buffer to render queue: {}", vk::to_string(submitResult))};
+        }
+
+        currFrame.waitTick = mainSemaphoreTick++;
+
         return newTexture;
     }
 
@@ -1188,6 +1260,7 @@ struct VulkanGraphicsContext::Impl {
         FrameContext &currFrame = GetCurrentFrameContext();
 
         // allocate new transient command buffer
+        // TODO: Recycle transient command buffers to batch multiple texture uploads into one command buffer.
         vk::CommandBuffer commandBuffer{};
 
         const vk::CommandBufferAllocateInfo commandBufferInfo{
@@ -1204,8 +1277,7 @@ struct VulkanGraphicsContext::Impl {
             .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
         };
         if (const auto beginResult = commandBuffer.begin(beginInfo); beginResult != vk::Result::eSuccess) {
-            return util::ErrorMessage{
-                fmt::format("Error beginning swapchain command buffer: {}", vk::to_string(beginResult))};
+            return util::ErrorMessage{fmt::format("Error beginning command buffer: {}", vk::to_string(beginResult))};
         }
 
         /// Upload texture
