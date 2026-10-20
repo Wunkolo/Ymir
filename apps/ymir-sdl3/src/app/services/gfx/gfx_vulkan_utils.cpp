@@ -14,6 +14,9 @@ void EnumerateVulkanGraphicsAdapters() {
         return;
     }
 
+    // Initialize instance function pointers
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.get());
+
     g_VulkanAdapters.clear();
 
     if (const auto enumerate_result = instance->enumeratePhysicalDevices(); enumerate_result.has_value()) {
