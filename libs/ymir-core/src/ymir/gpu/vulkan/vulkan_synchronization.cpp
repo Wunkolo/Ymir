@@ -63,39 +63,49 @@ void FindQueueFamilyIndices(vk::PhysicalDevice physicalDevice, vk::SurfaceKHR su
     }
 }
 
-const std::array<float, 3> QueuePriority = {{1.0f, 1.0f, 1.0f}};
+const std::array<float, 3> queuePriority = {{1.0f, 1.0f, 1.0f}};
 
 std::vector<vk::DeviceQueueCreateInfo>
-DetermineQueueIndexAllocation(const std::optional<uint32> &presentQueueFamilyIndex,
+DetermineQueueIndexAllocation(vk::PhysicalDevice physicalDevice, const std::optional<uint32> &presentQueueFamilyIndex,
                               const std::optional<uint32> &renderQueueFamilyIndex,
                               const std::optional<uint32> &transferQueueFamilyIndex, uint32 &presentQueueIndex,
                               uint32 &renderQueueIndex, uint32 &transferQueueIndex) {
-    std::vector<vk::DeviceQueueCreateInfo> QueueInfo;
+    const std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
 
     // Create QueueInfos based on the number of unique queue-families that
     // are actually required
-    std::unordered_map<uint32, uint32> QueueFamilyHistogram;
+    std::unordered_map<uint32, uint32> queueFamilyHistogram;
     if (renderQueueFamilyIndex.has_value()) {
-        renderQueueIndex = QueueFamilyHistogram[renderQueueFamilyIndex.value()]++;
+        renderQueueIndex = queueFamilyHistogram[renderQueueFamilyIndex.value()];
+        queueFamilyHistogram[renderQueueFamilyIndex.value()] =
+            std::min(queueFamilyHistogram[renderQueueFamilyIndex.value()] + 1,
+                     queueFamilyProperties[renderQueueFamilyIndex.value()].queueCount - 1);
     }
     if (presentQueueFamilyIndex.has_value()) {
-        presentQueueIndex = QueueFamilyHistogram[presentQueueFamilyIndex.value()]++;
+        presentQueueIndex = queueFamilyHistogram[presentQueueFamilyIndex.value()];
+        queueFamilyHistogram[presentQueueFamilyIndex.value()] =
+            std::min(queueFamilyHistogram[presentQueueFamilyIndex.value()] + 1,
+                     queueFamilyProperties[presentQueueFamilyIndex.value()].queueCount - 1);
     }
     if (transferQueueFamilyIndex.has_value()) {
-        transferQueueIndex = QueueFamilyHistogram[transferQueueFamilyIndex.value()]++;
+        transferQueueIndex = queueFamilyHistogram[transferQueueFamilyIndex.value()];
+        queueFamilyHistogram[transferQueueFamilyIndex.value()] =
+            std::min(queueFamilyHistogram[transferQueueFamilyIndex.value()] + 1,
+                     queueFamilyProperties[transferQueueFamilyIndex.value()].queueCount - 1);
     }
 
-    QueueInfo.reserve(QueueFamilyHistogram.size());
-    for (const auto &[QueueFamily, QueueFamilyCount] : QueueFamilyHistogram) {
-        QueueInfo.emplace_back(vk::DeviceQueueCreateInfo{
+    std::vector<vk::DeviceQueueCreateInfo> queueInfo;
+    queueInfo.reserve(queueFamilyHistogram.size());
+    for (const auto &[queueFamily, queueFamilyLastIndex] : queueFamilyHistogram) {
+        queueInfo.emplace_back(vk::DeviceQueueCreateInfo{
             .flags = {},
-            .queueFamilyIndex = QueueFamily,
-            .queueCount = QueueFamilyCount,
-            .pQueuePriorities = QueuePriority.data(),
+            .queueFamilyIndex = queueFamily,
+            .queueCount = queueFamilyLastIndex + 1,
+            .pQueuePriorities = queuePriority.data(),
         });
     }
 
-    return QueueInfo;
+    return queueInfo;
 }
 
 util::ValueResult<uint64> UpdateTimelineSemaphoreValue(const vk::Device logicalDevice,

@@ -278,7 +278,7 @@ struct VulkanGraphicsContext::Impl {
         // In the case that queues families are re-used, these are indices for the
         // particular queue to be allocated
         const std::vector<vk::DeviceQueueCreateInfo> queueInfo = DetermineQueueIndexAllocation(
-            bestPresentQueueFamilyIndex, bestRenderQueueFamilyIndex, bestTransferQueueFamilyIndex,
+            physicalDevice, bestPresentQueueFamilyIndex, bestRenderQueueFamilyIndex, bestTransferQueueFamilyIndex,
             presentQueueFamilyIndex, renderQueueFamilyIndex, transferQueueFamilyIndex);
 
         deviceInfo.queueCreateInfoCount = static_cast<uint32>(queueInfo.size());

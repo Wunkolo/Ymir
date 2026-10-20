@@ -21,7 +21,8 @@ void FindQueueFamilyIndices(vk::PhysicalDevice physicalDevice, vk::SurfaceKHR su
                             std::optional<uint32> &transferQueueFamilyIndex);
 
 std::vector<vk::DeviceQueueCreateInfo>
-DetermineQueueIndexAllocation(const std::optional<uint32> &presentQueueFamilyIndex,
+DetermineQueueIndexAllocation(vk::PhysicalDevice physicalDevice,
+    const std::optional<uint32> &presentQueueFamilyIndex,
                               const std::optional<uint32> &renderQueueFamilyIndex,
                               const std::optional<uint32> &transferQueueFamilyIndex, uint32 &presentQueueIndex,
                               uint32 &renderQueueIndex, uint32 &transferQueueIndex);
