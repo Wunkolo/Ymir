@@ -94,8 +94,7 @@ struct alignas(uint32) DrawTextureConstants {
 
 struct VulkanGraphicsContext::Impl {
     explicit Impl(const VulkanGraphicsContextSpec &spec)
-        : spec(spec) {
-    }
+        : spec(spec) {}
 
     static constexpr uint8 kFrameCount = 3;
     static constexpr uint32 kTextureDescriptorCount = 256;
@@ -1891,10 +1890,7 @@ VulkanGraphicsContext::VulkanGraphicsContext(const VulkanGraphicsContextSpec &sp
     , m_impl(std::make_unique<Impl>(spec)) {}
 
 VulkanGraphicsContext::~VulkanGraphicsContext() {
-    if (m_impl->IsInitialized()) {
-        m_impl->WaitForGPU();
-        ImGuiShutdown();
-    }
+    Shutdown();
 }
 
 util::ObjectResult<VulkanGraphicsContext> VulkanGraphicsContext::Create(const VulkanGraphicsContextSpec &spec) {
@@ -1907,10 +1903,24 @@ util::ObjectResult<VulkanGraphicsContext> VulkanGraphicsContext::Create(const Vu
 }
 
 util::VoidResult<> VulkanGraphicsContext::Initialize() {
+    if (m_impl) {
+        // Recreate the implementation
+        const VulkanGraphicsContextSpec spec = m_impl->spec;
+        Shutdown();
+        m_impl = std::make_unique<Impl>(spec);
+    }
     return m_impl->Init();
 }
 
-void VulkanGraphicsContext::Shutdown() {}
+void VulkanGraphicsContext::Shutdown() {
+    if (m_impl) {
+        if (m_impl->IsInitialized()) {
+            m_impl->WaitForGPU();
+        }
+        ImGuiShutdown();
+        m_impl.reset();
+    }
+}
 
 bool VulkanGraphicsContext::IsInitialized() const {
     return m_impl->IsInitialized();
