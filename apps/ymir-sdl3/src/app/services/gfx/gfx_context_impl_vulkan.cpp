@@ -94,7 +94,8 @@ struct alignas(uint32) DrawTextureConstants {
 
 struct VulkanGraphicsContext::Impl {
     explicit Impl(const VulkanGraphicsContextSpec &spec)
-        : spec(spec) {}
+        : spec(spec) {
+    }
 
     static constexpr uint8 kFrameCount = 3;
     static constexpr uint32 kTextureDescriptorCount = 256;

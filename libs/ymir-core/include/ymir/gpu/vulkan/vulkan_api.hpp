@@ -25,6 +25,7 @@
 
 namespace ymir::gpu::vulkan {
 
-vk::UniqueInstance CreateInstance(std::span<const char *const> instanceExtensions);
+vk::UniqueInstance CreateInstance(std::span<const char *const> instanceExtensions,
+                                  const vk::detail::DispatchLoaderDynamic &dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER);
 
 }

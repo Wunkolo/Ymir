@@ -15,7 +15,8 @@ static const bool vulkan_loader = []() -> bool {
 
 namespace ymir::gpu::vulkan {
 
-vk::UniqueInstance CreateInstance(std::span<const char *const> instanceExtensions) {
+vk::UniqueInstance CreateInstance(std::span<const char *const> instanceExtensions,
+                                  const vk::detail::DispatchLoaderDynamic &dispatcher) {
     vk::UniqueInstance result;
     // Create a minimal instance to enumerate physical devices
     static const vk::ApplicationInfo applicationInfo = {
@@ -32,7 +33,8 @@ vk::UniqueInstance CreateInstance(std::span<const char *const> instanceExtension
         .ppEnabledExtensionNames = instanceExtensions.data(),
     };
 
-    if (auto createResult = vk::createInstanceUnique(instanceInfo); createResult.result == vk::Result::eSuccess) {
+    if (auto createResult = vk::createInstanceUnique(instanceInfo, nullptr, dispatcher);
+        createResult.result == vk::Result::eSuccess) {
         return std::move(createResult.value);
     };
     return {};
