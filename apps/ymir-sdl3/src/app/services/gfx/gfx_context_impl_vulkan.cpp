@@ -652,6 +652,33 @@ struct VulkanGraphicsContext::Impl {
         return {};
     }
 
+    void Shutdown() {
+        streamBuffers.clear();
+        DeletePendingTextures(true);
+        textures.clear();
+        renderTargetPipelineLayout.reset();
+        quadVertexBufferMemory.reset();
+        quadVertexBuffer.reset();
+        renderTargetLoadRenderPasses.clear();
+        renderTargetClearRenderPasses.clear();
+        renderTargetPipelines.clear();
+        samplerLinear.reset();
+        samplerNearest.reset();
+        for (FrameContext &frame : frames) {
+            frame.waitTick.reset();
+            frame.transcientCommandBuffers.clear();
+            frame.mainCommandBuffer.reset();
+            frame.commandPool.reset();
+        }
+        swapchain.reset();
+        descriptorHeapTexture.reset();
+        descriptorUpdateBatch.reset();
+        mainSemaphore.reset();
+        device.reset();
+        debugMessenger.reset();
+        instance.reset();
+    }
+
     bool IsInitialized() const {
         return device.get() != nullptr;
     }
@@ -1903,22 +1930,14 @@ util::ObjectResult<VulkanGraphicsContext> VulkanGraphicsContext::Create(const Vu
 }
 
 util::VoidResult<> VulkanGraphicsContext::Initialize() {
-    if (m_impl) {
-        // Recreate the implementation
-        const VulkanGraphicsContextSpec spec = m_impl->spec;
-        Shutdown();
-        m_impl = std::make_unique<Impl>(spec);
-    }
     return m_impl->Init();
 }
 
 void VulkanGraphicsContext::Shutdown() {
-    if (m_impl) {
-        if (m_impl->IsInitialized()) {
-            m_impl->WaitForGPU();
-        }
+    if (m_impl->IsInitialized()) {
+        m_impl->WaitForGPU();
         ImGuiShutdown();
-        m_impl.reset();
+        m_impl->Shutdown();
     }
 }
 
