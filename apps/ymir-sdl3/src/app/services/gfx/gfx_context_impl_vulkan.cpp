@@ -242,7 +242,9 @@ struct VulkanGraphicsContext::Impl {
             }
         }
 
-        SDL_Vulkan_CreateSurface(spec.window, instance.get(), nullptr, (VkSurfaceKHR *)&surface);
+        if (!SDL_Vulkan_CreateSurface(spec.window, instance.get(), nullptr, (VkSurfaceKHR *)&surface)) {
+            return util::ErrorMessage{SDL_GetError()};
+        }
 
         // Create Device
         vk::DeviceCreateInfo deviceInfo = {};
@@ -674,6 +676,8 @@ struct VulkanGraphicsContext::Impl {
         descriptorHeapTexture.reset();
         descriptorUpdateBatch.reset();
         mainSemaphore.reset();
+        SDL_Vulkan_DestroySurface(instance.get(), surface, nullptr);
+        surface = nullptr;
         device.reset();
         debugMessenger.reset();
         instance.reset();
