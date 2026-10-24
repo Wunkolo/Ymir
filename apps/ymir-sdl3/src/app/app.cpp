@@ -783,6 +783,9 @@ void App::RunEmulator() {
         SDL_SetNumberProperty(windowProps, SDL_PROP_WINDOW_CREATE_Y_NUMBER, windowY);
         SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true);
         SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, settings.video.fullScreen.Get());
+#if YMIR_PLATFORM_HAS_VULKAN
+        SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
+#endif
     }
 
     screen.window = SDL_CreateWindowWithProperties(windowProps);
