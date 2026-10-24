@@ -42,26 +42,27 @@ vk::PresentModeKHR FindPresentMode(const vk::PhysicalDevice &physicalDevice, con
                                     }) != presentModes.cend();
     };
 
-    const bool hasImmediate = SupportsPresentMode(vk::PresentModeKHR::eImmediate);
-
-    const bool hasMailbox = SupportsPresentMode(vk::PresentModeKHR::eMailbox);
-
     // Vulkan mandates support for FIFO present mode as a baseline
     // Hard-sync with the monitor's refresh rate(vsync) with a FIFO queue
     // No tearing, most latency
     vk::PresentModeKHR result = vk::PresentModeKHR::eFifo;
 
-    // Double/Triple/etc-Buffering with adaptive sync, similar to FIFO but
-    // new images are allowed to bypass the queue when full and be presented
-    // immediately as it comes in.
-    // No tearing, less latency
-    result = hasMailbox ? vk::PresentModeKHR::eMailbox : result;
-
-    // No VSync requested
+    // No VSync requested, try some alternative options in order of latency:
+    // Immediate > Mailbox > FIFO-Relaxed
     if (!vsync) {
         // Immediately present frame, no synchronization
         // Tearing, minimal latency
-        result = hasImmediate ? vk::PresentModeKHR::eImmediate : result;
+        result = SupportsPresentMode(vk::PresentModeKHR::eImmediate) ? vk::PresentModeKHR::eImmediate : result;
+
+        // Double/Triple/etc-Buffering with adaptive sync, similar to FIFO but
+        // new images are allowed to bypass the queue when full and be presented
+        // immediately as it comes in.
+        // No tearing, less latency
+        result = SupportsPresentMode(vk::PresentModeKHR::eMailbox) ? vk::PresentModeKHR::eMailbox : result;
+
+        // Relaxed FIFO, similar to FIFO but if the application is late and misses the next vsync, the image is
+        // presented immediately instead of waiting for the next vsync.
+        result = SupportsPresentMode(vk::PresentModeKHR::eFifoRelaxed) ? vk::PresentModeKHR::eFifoRelaxed : result;
     }
 
     return result;
