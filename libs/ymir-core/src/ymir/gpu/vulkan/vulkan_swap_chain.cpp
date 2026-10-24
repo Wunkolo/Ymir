@@ -88,7 +88,7 @@ VulkanSwapchain::~VulkanSwapchain() {
     }
 }
 
-util::VoidResult<> VulkanSwapchain::RecreateSwapchain(std::optional<vk::Extent2D> newExtent,
+util::VoidResult<> VulkanSwapchain::RecreateSwapchain(uint8 swapchainCount, std::optional<vk::Extent2D> newExtent,
                                                       std::optional<vk::SwapchainKHR> oldSwapchain,
                                                       uint8 *nextSwapIndex, vk::Fence nextSwapSignalFence) {
     // Unfortunately this is the best way to ensure that any currently in-flight
@@ -120,9 +120,9 @@ util::VoidResult<> VulkanSwapchain::RecreateSwapchain(std::optional<vk::Extent2D
     // `maxImageCount` may be `0`, indicating there is no limit
     if (surfaceCapabilities.maxImageCount != 0u) {
         m_swapImageCount =
-            std::clamp<uint32>(m_swapImageCount, surfaceCapabilities.minImageCount, surfaceCapabilities.maxImageCount);
+            std::clamp<uint32>(swapchainCount, surfaceCapabilities.minImageCount, surfaceCapabilities.maxImageCount);
     } else {
-        m_swapImageCount = std::max<uint32>(m_swapImageCount, surfaceCapabilities.minImageCount);
+        m_swapImageCount = std::max<uint32>(swapchainCount, surfaceCapabilities.minImageCount);
     }
 
     /// Swapchain image extents
@@ -390,7 +390,8 @@ util::ValueResult<vk::Semaphore> VulkanSwapchain::AcquireNextImage(uint8_t *next
     case vk::Result::eErrorSurfaceLostKHR:
     case vk::Result::eErrorOutOfDateKHR: {
         // Swapchain needs to be recreated
-        if (const auto recreateResult = RecreateSwapchain({}, m_swapchainInstance.get(), nextSwapIndex, signalFence)) {
+        if (const auto recreateResult =
+                RecreateSwapchain(m_swapImageCount, {}, m_swapchainInstance.get(), nextSwapIndex, signalFence)) {
             if (IsValid()) {
                 return GetCurrentImageAcquiredSemaphore();
             } else {
@@ -453,13 +454,10 @@ util::ValueResult<VulkanSwapchain> VulkanSwapchain::Create(vk::Device device, vk
     newSwapchain.m_surface = surface;
     newSwapchain.m_vsync = vsync;
 
-    // Let RecreateSwapchain "fix" these assignments
-    newSwapchain.m_swapImageCount = swapchainCount;
-
     const vk::SwapchainKHR OldSwapchainHandle =
         oldSwapchain != nullptr ? oldSwapchain->m_swapchainInstance.get() : vk::SwapchainKHR();
 
-    newSwapchain.RecreateSwapchain({}, OldSwapchainHandle);
+    newSwapchain.RecreateSwapchain(swapchainCount, {}, OldSwapchainHandle);
 
     return newSwapchain;
 }

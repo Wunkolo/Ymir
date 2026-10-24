@@ -17,9 +17,9 @@ void FindQueueFamilyIndices(vk::PhysicalDevice physicalDevice, vk::SurfaceKHR su
                 (void)queueFamilyProperty;
 
                 // If the queue-family supports presenting to this particular surface, then we want it!
-                if (auto GetResult = physicalDevice.getSurfaceSupportKHR(curQueueFamilyIndex, surface);
-                    GetResult.result == vk::Result::eSuccess) {
-                    if (GetResult.value == vk::True) {
+                if (auto getResult = physicalDevice.getSurfaceSupportKHR(curQueueFamilyIndex, surface);
+                    getResult.result == vk::Result::eSuccess) {
+                    if (getResult.value == vk::True) {
                         presentQueueFamilyIndex = curQueueFamilyIndex;
                         break;
                     }

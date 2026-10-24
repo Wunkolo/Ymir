@@ -695,12 +695,12 @@ struct VulkanGraphicsContext::Impl {
         // Flush all current GPU commands
         WaitForGPU();
 
-        swapchain->RecreateSwapchain(
-            vk::Extent2D{
-                .width = width,
-                .height = height,
-            },
-            {}, &frameIndex);
+        swapchain->RecreateSwapchain(kFrameCount,
+                                     vk::Extent2D{
+                                         .width = width,
+                                         .height = height,
+                                     },
+                                     {}, &frameIndex);
 
         const vk::Extent2D swapExtents = swapchain->GetSwapchainExtents();
         viewport = vk::Viewport{
@@ -1973,7 +1973,7 @@ bool VulkanGraphicsContext::ImGuiInit() {
         .Queue = m_impl->renderQueue,
         .DescriptorPool = {},
         .DescriptorPoolSize = VulkanGraphicsContext::Impl::kTextureDescriptorCount,
-        .MinImageCount = VulkanGraphicsContext::Impl::kFrameCount,
+        .MinImageCount = 2,
         .ImageCount = m_impl->swapchain->GetSwapchainCount(),
         .PipelineCache = nullptr,
         .PipelineInfoMain = pipelineInfoMain,

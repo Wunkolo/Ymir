@@ -116,7 +116,7 @@ public:
         return GetImagePresentReadySemaphore(m_nextSwapImageIndex);
     }
 
-    util::VoidResult<> RecreateSwapchain(std::optional<vk::Extent2D> newExtent = {},
+    util::VoidResult<> RecreateSwapchain(uint8 swapchainCount, std::optional<vk::Extent2D> newExtent = {},
                                          std::optional<vk::SwapchainKHR> oldSwapchain = {},
                                          uint8 *nextSwapIndex = nullptr, vk::Fence nextSwapSignalFence = {});
 
